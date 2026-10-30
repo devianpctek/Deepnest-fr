@@ -1,4 +1,6 @@
 const electron = require('electron')
+const remoteMain = require('@electron/remote/main');
+remoteMain.initialize();
 const { Menu, ipcMain } = electron
 const fs = require('graceful-fs');
 
@@ -60,16 +62,17 @@ let mainWindow = null;
 var backgroundWindows = [];
 
 // single instance
-const shouldQuit = app.makeSingleInstance((commandLine, workingDirectory) => {
-  // Someone tried to run a second instance, we should focus our window.
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.focus()
-  }
-})
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
-if (shouldQuit) {
-  app.quit()
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
 }
 
 function createMainWindow() {
@@ -80,7 +83,13 @@ function createMainWindow() {
   var frameless = process.platform == 'darwin';
   //var frameless = true;
   
-  mainWindow = new BrowserWindow({width: Math.ceil(width*0.9), height: Math.ceil(height*0.9), frame: !frameless, show: false})
+  mainWindow = new BrowserWindow({width: Math.ceil(width*0.9), height: Math.ceil(height*0.9), frame: !frameless, show: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+      sandbox: false
+    }
+  })
 
   // and load the index.html of the app.
   mainWindow.loadURL(url.format({
@@ -89,10 +98,11 @@ function createMainWindow() {
     slashes: true
   }));
   
+  remoteMain.enable(mainWindow.webContents);
   mainWindow.setMenu(null);
 
   // Open the DevTools.
-  //mainWindow.webContents.openDevTools()
+  mainWindow.webContents.openDevTools()
 
   // Emitted when the window is closed.
   mainWindow.on('closed', function () {
@@ -110,18 +120,43 @@ function createBackgroundWindows() {
 	// used to have 8, now just 1 background window
 	if(winCount < 1){
 		var back = new BrowserWindow({
-			show: false
+			show: false,
+                        webPreferences: {
+                          nodeIntegration: true,
+                          contextIsolation: false,
+                          sandbox: false
+                        }
 		});
 		
 		//back.webContents.openDevTools();
 		
-		back.loadURL(url.format({
+		
+                // Diagnóstico temporal del motor de nesting
+                back.webContents.on('did-finish-load', () => {
+                    console.log('[BACKGROUND] Cargada:', back.webContents.getURL());
+                    back.webContents.openDevTools({ mode: 'detach' });
+                });
+
+                back.webContents.on('did-fail-load', (event, code, description) => {
+                    console.error('[BACKGROUND] Error de carga:', code, description);
+                });
+
+                back.webContents.on('console-message', (event, level, message) => {
+                    console.log('[BACKGROUND CONSOLE]', level, message);
+                });
+
+                back.webContents.on('render-process-gone', (event, details) => {
+                    console.error('[BACKGROUND] Renderer terminado:', details);
+                });
+
+back.loadURL(url.format({
 			pathname: path.join(__dirname, './main/background.html'),
 			protocol: 'file:',
 			slashes: true
 		}));
 		
-		backgroundWindows[winCount] = back;
+		remoteMain.enable(back.webContents);
+                backgroundWindows[winCount] = back;
 		
 		back.once('ready-to-show', () => {
 		  //back.show();
@@ -154,7 +189,7 @@ app.on('activate', function () {
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
   if (mainWindow === null) {
-    createWindow()
+    createMainWindow()
   }
 })
 

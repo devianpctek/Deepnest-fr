@@ -2,7 +2,7 @@
 #include "minkowski.h"
 
 using v8::FunctionTemplate;
-using v8::Handle;
+
 using v8::Object;
 using v8::String;
 using Nan::GetFunction;
@@ -16,4 +16,4 @@ NAN_MODULE_INIT(InitAll) {
     GetFunction(New<FunctionTemplate>(calculateNFP)).ToLocalChecked());
 }
 
-NODE_MODULE(addon, InitAll)
+NAN_MODULE_WORKER_ENABLED(addon, InitAll)

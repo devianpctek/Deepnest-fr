@@ -32,7 +32,8 @@
 			}
 		}
 		
-		const { ipcRenderer } = require('electron');
+		require('./compat/electron-remote');
+                const { ipcRenderer } = require('electron');
 		const fs = require('graceful-fs');
 		const request = require('request');
 		const http = require('http');
@@ -565,7 +566,8 @@
 				
 					   { name: 'CAD formats', extensions: ['svg', 'dxf', 'cdr'] }
 				
-					  ]}, function (fileName) {
+					  ]} ).then(function (result) {
+						var fileName = result.canceled ? undefined : result.filePaths;
 						if(fileName === undefined){
 							importbutton.className = 'button import';
 							console.log("No file selected");
@@ -628,6 +630,10 @@
 							}
 						}
 						
+					}).catch(function (err) {
+						importbutton.className = 'button import';
+						console.error('Error al abrir selector de archivos:', err);
+						message('Error al abrir el selector de archivos: ' + err.message, true);
 					});
 				}, 50);
 				
@@ -985,7 +991,8 @@
 			exportsvg.onclick = function(){
 				
 				var dialog = app.dialog;
-				dialog.showSaveDialog({title: 'Export Deepnest SVG'}, function (fileName) {
+				dialog.showSaveDialog({title: 'Export Deepnest SVG'}).then(function (result) {
+					var fileName = result.canceled ? undefined : result.filePath;
 					if(fileName === undefined){
 						console.log("No file selected");
 					}
@@ -1000,13 +1007,17 @@
 						
 						fs.writeFileSync(fileName, exportNest(selected.pop()));
 					}
+				}).catch(function (err) {
+					console.error('Error al exportar SVG:', err);
+					message('Error al exportar SVG: ' + err.message, true);
 				});
 			};
 			
 			var exportdxf = document.querySelector('#exportdxf');
 			exportdxf.onclick = function(){
 				var dialog = app.dialog;
-				dialog.showSaveDialog({title: 'Export Deepnest DXF'}, function (fileName) {
+				dialog.showSaveDialog({title: 'Export Deepnest DXF'}).then(function (result) {
+					var fileName = result.canceled ? undefined : result.filePath;
 					if(fileName === undefined){
 						console.log("No file selected");
 					}
@@ -1047,6 +1058,9 @@
 						  contentType: 'image/svg+xml'
 						});
 					}
+				}).catch(function (err) {
+					console.error('Error al exportar DXF:', err);
+					message('Error al exportar DXF: ' + err.message, true);
 				});
 			};
 			/*

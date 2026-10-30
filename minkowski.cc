@@ -7,6 +7,8 @@
 #include <iostream>
 #include <sstream>
 #include <limits>
+#include <cmath>
+#include <initializer_list>
 
 #undef min
 #undef max
@@ -91,13 +93,13 @@ void convolve_two_polygon_sets(polygon_set& result, const polygon_set& a, const 
   }
 }
 
-double inputscale;
+
 
 using v8::Local;
 using v8::Array;
 using v8::Isolate;
 using v8::String;
-using v8::Handle;
+
 using v8::Object;
 using v8::Value;
 
@@ -108,12 +110,51 @@ NAN_METHOD(calculateNFP) {
   //std::streambuf * old = std::cout.rdbuf(buffer.rdbuf());
   
   Isolate* isolate = info.GetIsolate();
+  if (info.Length() < 1 || !info[0]->IsObject()) {
+    return Nan::ThrowTypeError("calculateNFP requires an object");
+  }
 
-  Handle<Object> group = Handle<Object>::Cast(info[0]);
-  Handle<Array> A = Handle<Array>::Cast(group->Get(String::NewFromUtf8(isolate,"A")));
-  Handle<Array> B = Handle<Array>::Cast(group->Get(String::NewFromUtf8(isolate,"B")));
+  Local<Object> group = info[0].As<Object>();
+  Local<v8::Value> AValue = Nan::Get(group, Nan::New("A").ToLocalChecked()).ToLocalChecked();
+  if (!AValue->IsArray()) return Nan::ThrowTypeError("A must be an array");
+  Local<Array> A = AValue.As<Array>();
+  Local<v8::Value> BValue = Nan::Get(group, Nan::New("B").ToLocalChecked()).ToLocalChecked();
+  if (!BValue->IsArray()) return Nan::ThrowTypeError("B must be an array");
+  Local<Array> B = BValue.As<Array>();
   
+  auto validatePoints = [](Local<Array> arr) -> bool {
+    if (arr->Length() < 3) return false;
+    for (uint32_t i = 0; i < arr->Length(); ++i) {
+      Local<v8::Value> value;
+      if (!Nan::Get(arr, i).ToLocal(&value) || !value->IsObject()) return false;
+      Local<Object> obj = value.As<Object>();
+      for (const char* key : {"x", "y"}) {
+        Local<v8::Value> coord;
+        if (!Nan::Get(obj, Nan::New(key).ToLocalChecked()).ToLocal(&coord) || !coord->IsNumber()) return false;
+        double number = Nan::To<double>(coord).FromMaybe(0);
+        if (!std::isfinite(number)) return false;
+      }
+    }
+    return true;
+  };
+  if (!validatePoints(A) || !validatePoints(B)) {
+    return Nan::ThrowTypeError("A and B must contain at least 3 finite coordinate points");
+  }
+  Local<v8::Value> initialHoles = Nan::Get(A, Nan::New("children").ToLocalChecked()).ToLocalChecked();
+  if (!initialHoles->IsUndefined() && !initialHoles->IsArray()) {
+    return Nan::ThrowTypeError("A.children must be an array when provided");
+  }
+  if (initialHoles->IsArray()) {
+    Local<Array> h = initialHoles.As<Array>();
+    for (uint32_t i = 0; i < h->Length(); ++i) {
+      Local<v8::Value> value = Nan::Get(h, i).ToLocalChecked();
+      if (!value->IsArray() || !validatePoints(value.As<Array>())) {
+        return Nan::ThrowTypeError("Invalid polygon in A.children");
+      }
+    }
+  }
   polygon_set a, b, c;
+  double inputscale = 1.0;
   std::vector<polygon> polys;
   std::vector<point> pts;
   
@@ -124,11 +165,11 @@ NAN_METHOD(calculateNFP) {
   double Amaxy = 0;
   double Aminy = 0;
   for (unsigned int i = 0; i < len; i++) {
-  	Local<Object> obj = Local<Object>::Cast(A->Get(i));
-  	Amaxx = (std::max)(Amaxx, (double)obj->Get(String::NewFromUtf8(isolate,"x"))->NumberValue());
-  	Aminx = (std::min)(Aminx, (double)obj->Get(String::NewFromUtf8(isolate,"x"))->NumberValue());
-  	Amaxy = (std::max)(Amaxy, (double)obj->Get(String::NewFromUtf8(isolate,"y"))->NumberValue());
-  	Aminy = (std::min)(Aminy, (double)obj->Get(String::NewFromUtf8(isolate,"y"))->NumberValue());
+        Local<Object> obj = Nan::Get(A, i).ToLocalChecked().As<Object>();
+        Amaxx = (std::max)(Amaxx, (double)Nan::To<double>(Nan::Get(obj, Nan::New("x").ToLocalChecked()).ToLocalChecked()).FromJust());
+        Aminx = (std::min)(Aminx, (double)Nan::To<double>(Nan::Get(obj, Nan::New("x").ToLocalChecked()).ToLocalChecked()).FromJust());
+        Amaxy = (std::max)(Amaxy, (double)Nan::To<double>(Nan::Get(obj, Nan::New("y").ToLocalChecked()).ToLocalChecked()).FromJust());
+        Aminy = (std::min)(Aminy, (double)Nan::To<double>(Nan::Get(obj, Nan::New("y").ToLocalChecked()).ToLocalChecked()).FromJust());
   }
   
   len = B->Length();
@@ -137,11 +178,11 @@ NAN_METHOD(calculateNFP) {
   double Bmaxy = 0;
   double Bminy = 0;
   for (unsigned int i = 0; i < len; i++) {
-  	Local<Object> obj = Local<Object>::Cast(B->Get(i));
-  	Bmaxx = (std::max)(Bmaxx, (double)obj->Get(String::NewFromUtf8(isolate,"x"))->NumberValue());
-  	Bminx = (std::min)(Bminx, (double)obj->Get(String::NewFromUtf8(isolate,"x"))->NumberValue());
-  	Bmaxy = (std::max)(Bmaxy, (double)obj->Get(String::NewFromUtf8(isolate,"y"))->NumberValue());
-  	Bminy = (std::min)(Bminy, (double)obj->Get(String::NewFromUtf8(isolate,"y"))->NumberValue());
+        Local<Object> obj = Nan::Get(B, i).ToLocalChecked().As<Object>();
+        Bmaxx = (std::max)(Bmaxx, (double)Nan::To<double>(Nan::Get(obj, Nan::New("x").ToLocalChecked()).ToLocalChecked()).FromJust());
+        Bminx = (std::min)(Bminx, (double)Nan::To<double>(Nan::Get(obj, Nan::New("x").ToLocalChecked()).ToLocalChecked()).FromJust());
+        Bmaxy = (std::max)(Bmaxy, (double)Nan::To<double>(Nan::Get(obj, Nan::New("y").ToLocalChecked()).ToLocalChecked()).FromJust());
+        Bminy = (std::min)(Bminy, (double)Nan::To<double>(Nan::Get(obj, Nan::New("y").ToLocalChecked()).ToLocalChecked()).FromJust());
   }
   
   double Cmaxx = Amaxx + Bmaxx;
@@ -156,7 +197,7 @@ NAN_METHOD(calculateNFP) {
   int maxi = std::numeric_limits<int>::max();
   
   if(maxda < 1){
-  	maxda = 1;
+        maxda = 1;
   }
   
   // why 0.1? dunno. it doesn't screw up with 0.1
@@ -166,9 +207,9 @@ NAN_METHOD(calculateNFP) {
   len = A->Length();
   
   for (unsigned int i = 0; i < len; i++) {
-    Local<Object> obj = Local<Object>::Cast(A->Get(i));
-    int x = (int)(inputscale * (double)obj->Get(String::NewFromUtf8(isolate,"x"))->NumberValue());
-    int y = (int)(inputscale * (double)obj->Get(String::NewFromUtf8(isolate,"y"))->NumberValue());
+    Local<Object> obj = Nan::Get(A, i).ToLocalChecked().As<Object>();
+    int x = (int)(inputscale * (double)Nan::To<double>(Nan::Get(obj, Nan::New("x").ToLocalChecked()).ToLocalChecked()).FromJust());
+    int y = (int)(inputscale * (double)Nan::To<double>(Nan::Get(obj, Nan::New("y").ToLocalChecked()).ToLocalChecked()).FromJust());
         
     pts.push_back(point(x, y));
   }
@@ -178,18 +219,19 @@ NAN_METHOD(calculateNFP) {
   a+=poly;
   
   // subtract holes from a here...
-  Handle<Array> holes = Handle<Array>::Cast(A->Get(String::NewFromUtf8(isolate,"children")));
+  Local<v8::Value> holesValue = Nan::Get(A, Nan::New("children").ToLocalChecked()).ToLocalChecked();
+  Local<Array> holes = holesValue->IsArray() ? holesValue.As<Array>() : Nan::New<Array>();
   len = holes->Length();
   
   for(unsigned int i=0; i<len; i++){
-    Handle<Array> hole = Handle<Array>::Cast(holes->Get(i));
+    Local<Array> hole = Nan::Get(holes, i).ToLocalChecked().As<Array>();
     pts.clear();
     unsigned int hlen = hole->Length();
     for(unsigned int j=0; j<hlen; j++){
-    	Local<Object> obj = Local<Object>::Cast(hole->Get(j));
-    	int x = (int)(inputscale * (double)obj->Get(String::NewFromUtf8(isolate,"x"))->NumberValue());
-    	int y = (int)(inputscale * (double)obj->Get(String::NewFromUtf8(isolate,"y"))->NumberValue());
-    	pts.push_back(point(x, y));
+        Local<Object> obj = Nan::Get(hole, j).ToLocalChecked().As<Object>();
+        int x = (int)(inputscale * (double)Nan::To<double>(Nan::Get(obj, Nan::New("x").ToLocalChecked()).ToLocalChecked()).FromJust());
+        int y = (int)(inputscale * (double)Nan::To<double>(Nan::Get(obj, Nan::New("y").ToLocalChecked()).ToLocalChecked()).FromJust());
+        pts.push_back(point(x, y));
     }
     boost::polygon::set_points(poly, pts.begin(), pts.end());
     a -= poly;
@@ -204,14 +246,14 @@ NAN_METHOD(calculateNFP) {
   double yshift = 0;
   
   for (unsigned int i = 0; i < len; i++) {
-    Local<Object> obj = Local<Object>::Cast(B->Get(i));
-    int x = -(int)(inputscale * (double)obj->Get(String::NewFromUtf8(isolate,"x"))->NumberValue());
-    int y = -(int)(inputscale * (double)obj->Get(String::NewFromUtf8(isolate,"y"))->NumberValue());
+    Local<Object> obj = Nan::Get(B, i).ToLocalChecked().As<Object>();
+    int x = -(int)(inputscale * (double)Nan::To<double>(Nan::Get(obj, Nan::New("x").ToLocalChecked()).ToLocalChecked()).FromJust());
+    int y = -(int)(inputscale * (double)Nan::To<double>(Nan::Get(obj, Nan::New("y").ToLocalChecked()).ToLocalChecked()).FromJust());
     pts.push_back(point(x, y));
     
     if(i==0){
-    	xshift = (double)obj->Get(String::NewFromUtf8(isolate,"x"))->NumberValue();
-    	yshift = (double)obj->Get(String::NewFromUtf8(isolate,"y"))->NumberValue();
+        xshift = (double)Nan::To<double>(Nan::Get(obj, Nan::New("x").ToLocalChecked()).ToLocalChecked()).FromJust();
+        yshift = (double)Nan::To<double>(Nan::Get(obj, Nan::New("y").ToLocalChecked()).ToLocalChecked()).FromJust();
     }
   }
   
@@ -227,16 +269,16 @@ NAN_METHOD(calculateNFP) {
   
   for(unsigned int i = 0; i < polys.size(); ++i ){
       
-  	Local<Array> pointlist = Array::New(isolate);
-  	int j = 0;
-  	  	
-  	for(polygon_traits<polygon>::iterator_type itr = polys[i].begin(); itr != polys[i].end(); ++itr) {
-  	   Local<Object> p = Object::New(isolate);
-  	 //  std::cout << (double)(*itr).get(boost::polygon::HORIZONTAL) / inputscale << std::endl;
-       p->Set(String::NewFromUtf8(isolate, "x"), v8::Number::New(isolate, ((double)(*itr).get(boost::polygon::HORIZONTAL)) / inputscale + xshift));
-       p->Set(String::NewFromUtf8(isolate, "y"), v8::Number::New(isolate, ((double)(*itr).get(boost::polygon::VERTICAL)) / inputscale + yshift));
+        Local<Array> pointlist = Array::New(isolate);
+        int j = 0;
+          
+        for(polygon_traits<polygon>::iterator_type itr = polys[i].begin(); itr != polys[i].end(); ++itr) {
+           Local<Object> p = Object::New(isolate);
+         //  std::cout << (double)(*itr).get(boost::polygon::HORIZONTAL) / inputscale << std::endl;
+       Nan::Set(p, Nan::New("x").ToLocalChecked(), v8::Number::New(isolate, ((double)(*itr).get(boost::polygon::HORIZONTAL)) / inputscale + xshift));
+       Nan::Set(p, Nan::New("y").ToLocalChecked(), v8::Number::New(isolate, ((double)(*itr).get(boost::polygon::VERTICAL)) / inputscale + yshift));
        
-       pointlist->Set(j, p);
+       Nan::Set(pointlist, j, p);
        j++;
     }
     
@@ -244,23 +286,23 @@ NAN_METHOD(calculateNFP) {
     Local<Array> children = Array::New(isolate);
     int k = 0;
     for(polygon_with_holes_traits<polygon>::iterator_holes_type itrh = begin_holes(polys[i]); itrh != end_holes(polys[i]); ++itrh){
-    	Local<Array> child = Array::New(isolate);
-    	int z = 0;
-    	for(polygon_traits<polygon>::iterator_type itr2 = (*itrh).begin(); itr2 != (*itrh).end(); ++itr2) {
-    		Local<Object> c = Object::New(isolate);
-    		c->Set(String::NewFromUtf8(isolate, "x"), v8::Number::New(isolate, ((double)(*itr2).get(boost::polygon::HORIZONTAL)) / inputscale + xshift));
-    		c->Set(String::NewFromUtf8(isolate, "y"), v8::Number::New(isolate, ((double)(*itr2).get(boost::polygon::VERTICAL)) / inputscale + yshift));
-    		
-    		child->Set(z, c);
-    		z++;
-    	}
-    	children->Set(k, child);
-    	k++;
+        Local<Array> child = Array::New(isolate);
+        int z = 0;
+        for(polygon_traits<polygon>::iterator_type itr2 = (*itrh).begin(); itr2 != (*itrh).end(); ++itr2) {
+                Local<Object> c = Object::New(isolate);
+                Nan::Set(c, Nan::New("x").ToLocalChecked(), v8::Number::New(isolate, ((double)(*itr2).get(boost::polygon::HORIZONTAL)) / inputscale + xshift));
+                Nan::Set(c, Nan::New("y").ToLocalChecked(), v8::Number::New(isolate, ((double)(*itr2).get(boost::polygon::VERTICAL)) / inputscale + yshift));
+    
+                Nan::Set(child, z, c);
+                z++;
+        }
+        Nan::Set(children, k, child);
+        k++;
     }
     
-    pointlist->Set(String::NewFromUtf8(isolate, "children"), children);
+    Nan::Set(pointlist, Nan::New("children").ToLocalChecked(), children);
     
-    result_list->Set(i, pointlist);
+    Nan::Set(result_list, i, pointlist);
   }
   
   //std::string text = buffer.str();
