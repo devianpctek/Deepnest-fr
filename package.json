@@ -1,6 +1,6 @@
 {
   "name": "Deepnest.io",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Deep nesting for Laser and CNC",
   "main": "main.js",
   "scripts": {
@@ -53,7 +53,7 @@
     "win": {
       "icon": "icon.ico"
     },
-    "productName": "Deepnest-fr",
+    "productName": "Deepnest - C&M Designs Edition",
     "asar": true,
     "asarUnpack": [
       "build/Release/*.node"
@@ -70,7 +70,8 @@
         "AppImage"
       ],
       "category": "Graphics",
-      "executableName": "deepnest-fr"
+      "executableName": "deepnest-fr",
+      "icon": "build/icons"
     },
     "extraResources": [
       {

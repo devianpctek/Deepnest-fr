@@ -1420,3 +1420,787 @@ background-position: 0 50%;
 #config dl.formgroup > dd { min-width: 0; }
 #config dl.formgroup > dd select { max-width: 100%; }
 #config dl.formgroup > dd .cm-scale-field { max-width: 100%; }
+
+
+/* C&M Designs v1.0.1 — material tabs inside existing lower-left tools. */
+#partstools.active{height:23em;overflow-y:auto;box-sizing:border-box;}
+#cm-panel-tabs{clear:both;display:flex;gap:6px;margin:5px 1.5em 10px;}
+#cm-panel-tabs button{flex:1;border:1px solid #9c843c;background:#b6c1ca;color:#27323a;border-radius:4px;padding:7px;cursor:pointer;font-weight:bold;}
+#cm-panel-tabs button.selected{background:#2d2e30;color:#e9c967;border-color:#d4af37;}
+#cm-materials-panel{display:none;clear:both;margin:0 1.5em 12px;padding:10px;background:#242526;color:#eee;border-left:3px solid #d4af37;border-radius:5px;font:12px Arial,sans-serif;}
+#cm-materials-panel .cm-mat-controls{display:flex;flex-wrap:wrap;gap:6px;margin:7px 0;align-items:center;}
+#cm-materials-panel select{width:100%;min-width:0;background:#171819;color:#fff;border:1px solid #d4af37;padding:7px;}
+#cm-materials-panel button{background:#393a3b;color:#fff;border:1px solid #9c843c;border-radius:3px;padding:6px 8px;cursor:pointer;}
+#cm-materials-panel button:hover{background:#5c4b22;}
+#cm-materials-panel button:disabled{opacity:.45;cursor:not-allowed;}
+#cm-materials-panel .cm-mat-note{font-size:11px;color:#aaa;margin:7px 0;}
+#cm-materials-panel .cm-mat-result{font-weight:bold;color:#e3c76a;margin-top:7px;}
+#rectangledialog #cm-rectangle-price{width:8em;}
+
+/* v1.0.1: inline Electron-compatible material editor; no prompt() dialogs. */
+#cm-mat-editor[hidden],#cm-mat-form[hidden],#cm-mat-delete-confirm[hidden]{display:none!important;}
+#cm-mat-editor{border-top:1px solid #70602e;margin-top:10px;padding-top:9px;}
+#cm-mat-form label{display:block;color:#e8d7a0;font-size:11px;margin:6px 0 3px;}
+#cm-mat-form input{width:100%;box-sizing:border-box;padding:6px;background:#161718;border:1px solid #8c7941;color:white;border-radius:3px;}
+#cm-mat-error{color:#ff9c92;font-size:11px;margin-top:5px;}
+#cm-mat-delete-confirm p{margin:6px 0;color:#e8d7a0;}
+
+/* C&M Designs Edition v1.0.1 — shared light/dark design tokens */
+:root[data-cm-theme="dark"]{--cm-bg:#191919;--cm-surface:#252525;--cm-panel:#303030;--cm-side:#242424;--cm-ink:#f0ede9;--cm-muted:#b7b3ad;--cm-border:#51504d;--cm-accent:#c6935e;--cm-accent-ink:#1a1510;--cm-input:#343434;--cm-workspace:#242629;--cm-row:#2d3033;}
+:root[data-cm-theme="light"]{--cm-bg:#f4f1ed;--cm-surface:#ffffff;--cm-panel:#eae6e0;--cm-side:#424242;--cm-ink:#242424;--cm-muted:#59534c;--cm-border:#c7bdb2;--cm-accent:#c6935e;--cm-accent-ink:#1a1510;--cm-input:#fff;--cm-workspace:#f6f7f8;--cm-row:#e8ebee;}
+html[data-cm-theme] body{background:var(--cm-bg);color:var(--cm-ink);}
+html[data-cm-theme] #main,html[data-cm-theme] .page{background-color:var(--cm-bg);color:var(--cm-ink);}
+html[data-cm-theme] #sidenav{background-color:var(--cm-side);}
+html[data-cm-theme] #sidenav li.active{background-color:#000;border-left:3px solid var(--cm-accent);}
+html[data-cm-theme] .topnav{background-color:var(--cm-surface);}
+html[data-cm-theme] #nest .topnav{background-color:var(--cm-side);}
+html[data-cm-theme] .topnav li.button:not(.disabled){background-color:var(--cm-accent);color:var(--cm-accent-ink);}
+html[data-cm-theme] #partstools{background-color:var(--cm-panel);color:var(--cm-ink);}
+html[data-cm-theme] #cm-panel-tabs button{background:var(--cm-surface);color:var(--cm-ink);border:1px solid var(--cm-border);}
+html[data-cm-theme] #cm-panel-tabs button.selected{background:var(--cm-accent);color:var(--cm-accent-ink);border-color:var(--cm-accent);}
+html[data-cm-theme] #cm-materials-panel{background:var(--cm-surface);color:var(--cm-ink);border-left:3px solid var(--cm-accent);font-family:Arial,sans-serif;}
+html[data-cm-theme] #cm-materials-panel select,html[data-cm-theme] #cm-mat-form input{background:var(--cm-input);color:var(--cm-ink);border:1px solid var(--cm-border);border-radius:4px;}
+html[data-cm-theme] #cm-materials-panel button{background:var(--cm-panel);color:var(--cm-ink);border:1px solid var(--cm-accent);}
+html[data-cm-theme] #cm-materials-panel button:hover:not(:disabled){background:var(--cm-accent);color:var(--cm-accent-ink);}
+html[data-cm-theme] #cm-mat-form label,html[data-cm-theme] #cm-mat-delete-confirm p{color:var(--cm-ink);}
+html[data-cm-theme] #cm-mat-editor{border-top:1px solid var(--cm-border);}
+html[data-cm-theme] #cm-materials-panel .cm-mat-result{color:var(--cm-accent);}
+html[data-cm-theme] #cm-materials-panel .cm-mat-note{color:var(--cm-muted);}
+html[data-cm-theme] #cm-mat-status:not([hidden]){padding:7px;border-radius:4px;background:var(--cm-panel);border-left:2px solid var(--cm-accent);}
+html[data-cm-theme] #cm-mat-status[hidden],html[data-cm-theme] #cm-mat-local[hidden],html[data-cm-theme] #cm-mat-result[hidden]{display:none!important;}
+html[data-cm-theme] #config{background:var(--cm-bg);color:var(--cm-ink);}
+html[data-cm-theme] #config input,html[data-cm-theme] #config select{accent-color:var(--cm-accent);}
+html[data-cm-theme] #config select{background:var(--cm-input);color:var(--cm-ink);border-color:var(--cm-border);}
+/* Keep the SVG preview canvas neutral: theme must not recolor cutting geometry. */
+
+
+/* C&M v1.0.1 — fix inherited white settings form in dark/system themes. */
+html[data-cm-theme] #configform {
+  background-color: var(--cm-surface);
+  color: var(--cm-ink);
+}
+html[data-cm-theme] #configform h1,
+html[data-cm-theme] #configform h2,
+html[data-cm-theme] #configform dt,
+html[data-cm-theme] #configform label {
+  color: var(--cm-ink);
+}
+html[data-cm-theme] #config dl dd {
+  background-color: transparent;
+  color: var(--cm-muted);
+}
+html[data-cm-theme] #configform input[type=text],
+html[data-cm-theme] #configform input[type=number] {
+  background-color: var(--cm-input);
+  border-color: var(--cm-border);
+  color: var(--cm-ink);
+}
+html[data-cm-theme] #configform input[type=text]:focus,
+html[data-cm-theme] #configform input[type=number]:focus {
+  background-color: var(--cm-input);
+  border-color: var(--cm-accent);
+  outline-color: var(--cm-accent);
+}
+html[data-cm-theme] #configform select {
+  background-color: var(--cm-input);
+  border: 1px solid var(--cm-border);
+  color: var(--cm-ink);
+}
+html[data-cm-theme] #configform i,
+html[data-cm-theme] #configform span {
+  color: var(--cm-muted);
+}
+
+
+/* C&M Designs v1.0.1 — unified nesting workspace; UI only. */
+html[data-cm-theme] #nest { background: var(--cm-bg); }
+html[data-cm-theme] #nestcontent { background: var(--cm-bg); color: var(--cm-ink); }
+html[data-cm-theme] #nestinfo {
+  box-sizing: border-box;
+  width: 28%;
+  padding: 2.1em 1.5em 2.5em;
+  background: var(--cm-surface);
+  border-right: 1px solid var(--cm-border);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+html[data-cm-theme] #nestinfo h1 { color: var(--cm-ink); }
+html[data-cm-theme] #nestinfo .label { color: var(--cm-muted); }
+html[data-cm-theme] #nestlist { min-height: 0; }
+html[data-cm-theme] #nestlist .nest { background: var(--cm-panel); }
+html[data-cm-theme] #nestlist .nest:hover { border-color: var(--cm-accent); }
+html[data-cm-theme] #nestlist .nest.active { border-color: var(--cm-accent); }
+html[data-cm-theme] #nestdisplay {
+  box-sizing: border-box;
+  width: 72%;
+  background: var(--cm-workspace);
+  border-left: 0;
+  overflow: auto;
+  scrollbar-gutter: auto;
+}
+/* Keep SVG geometry and export serialization unchanged. */
+html[data-cm-theme] #nestdisplay svg { max-width: none; }
+html[data-cm-theme] #cm-nest-progress {
+  box-sizing: border-box;
+  width: 72%;
+  right: 0;
+  color: var(--cm-ink);
+}
+html[data-cm-theme] .cm-brand-hint { color: var(--cm-muted); }
+html[data-cm-theme] #progressbar { background: var(--cm-accent); }
+html[data-cm-theme] #nestinfo,
+html[data-cm-theme] #nestdisplay,
+html[data-cm-theme] #partscroll,
+html[data-cm-theme] #configform {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cm-border) transparent;
+}
+html[data-cm-theme] #nestinfo::-webkit-scrollbar,
+html[data-cm-theme] #nestdisplay::-webkit-scrollbar,
+html[data-cm-theme] #partscroll::-webkit-scrollbar,
+html[data-cm-theme] #configform::-webkit-scrollbar { width: 7px; height: 7px; }
+html[data-cm-theme] #nestinfo::-webkit-scrollbar-thumb,
+html[data-cm-theme] #nestdisplay::-webkit-scrollbar-thumb,
+html[data-cm-theme] #partscroll::-webkit-scrollbar-thumb,
+html[data-cm-theme] #configform::-webkit-scrollbar-thumb {
+  background: var(--cm-border);
+  border-radius: 8px;
+}
+/* About screen: override legacy white canvas and inline text colors. */
+html[data-cm-theme] #info {
+  box-sizing: border-box;
+  background: var(--cm-surface);
+  color: var(--cm-ink);
+  border-right: 1px solid var(--cm-border);
+}
+html[data-cm-theme] #info > h1 { color: var(--cm-accent) !important; }
+html[data-cm-theme] #info > div { color: var(--cm-muted) !important; }
+html[data-cm-theme] #info .cm-about-version {
+  color: var(--cm-accent) !important;
+  font-weight: 600;
+  margin-top: 0.5em;
+}
+@media (max-width: 850px) {
+  html[data-cm-theme] #nestinfo { width: 34%; padding: 1.5em 1em; }
+  html[data-cm-theme] #nestdisplay,
+  html[data-cm-theme] #cm-nest-progress { width: 66%; }
+}
+
+/* C&M v1.0.1 — global navigation and legible SVG preview (display only). */
+html[data-cm-theme] #sidenav {
+  position: fixed;
+  left: 0;
+  top: 0;
+  height: 100vh;
+  z-index: 100;
+}
+html[data-cm-theme] #nest {
+  width: calc(100% - var(--nav-width));
+  z-index: 2;
+}
+html[data-cm-theme] #nest.active { left: var(--nav-width); }
+html[data-cm-theme] #main { z-index: 3; }
+html[data-cm-theme] #main:not(.active) { pointer-events: none; }
+html[data-cm-theme] body.cm-nest-overlay #main { z-index: 5; }
+html[data-cm-theme] #cm_results_tab {
+  background-image: url(img/settings.svg);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 1.2em;
+  cursor: pointer;
+  opacity: .9;
+}
+html[data-cm-theme] #cm_results_tab::after {
+  content: '▤'; display: block; text-align: center;
+  line-height: var(--nav-width); font-size: 1.5em;
+  color: var(--cm-accent); background: var(--cm-side);
+}
+html[data-cm-theme] #cm_results_tab.active::after { background: #000; }
+/* The nesting SVG is a screen preview. These rules never alter SVG serialization. */
+html[data-cm-theme="light"] #nestdisplay svg .part,
+html[data-cm-theme="light"] #nestdisplay svg .part * {
+  stroke: #242424 !important;
+}
+html[data-cm-theme="light"] #nestdisplay svg .sheet,
+html[data-cm-theme="light"] #nestdisplay svg .sheet * {
+  stroke: #986435 !important;
+}
+html[data-cm-theme="light"] #nestdisplay svg .cm-sheet-boundary {
+  stroke: #986435 !important;
+}
+html[data-cm-theme="dark"] #nestdisplay svg .part,
+html[data-cm-theme="dark"] #nestdisplay svg .part * {
+  stroke: #f4f0e9 !important;
+}
+
+/* C&M v1.0.1 — accessible imported-file tabs and action buttons */
+html[data-cm-theme] #importsnav li {
+  background: var(--cm-panel) !important;
+  color: var(--cm-ink) !important;
+  border: 1px solid var(--cm-border);
+  border-bottom: none;
+  opacity: 1;
+  text-shadow: none;
+}
+html[data-cm-theme] #importsnav li.active {
+  background: var(--cm-workspace) !important;
+  color: var(--cm-ink) !important;
+  border-top: 2px solid var(--cm-accent);
+  font-weight: 600;
+}
+html[data-cm-theme] #importsnav li:hover {
+  background: var(--cm-surface) !important;
+  color: var(--cm-ink) !important;
+}
+html[data-cm-theme] #partstools { position: absolute; }
+html[data-cm-theme] #cm-collapse-tools {
+  display: none;
+  float: right;
+  margin: .65em 1em 0 0;
+  width: 2.2em;
+  height: 2.2em;
+  border: 1px solid var(--cm-border);
+  border-radius: 5px;
+  background: var(--cm-surface);
+  color: var(--cm-ink);
+  font-size: 1em;
+  font-weight: bold;
+  cursor: pointer;
+}
+html[data-cm-theme] #partstools.active #cm-collapse-tools { display: block; }
+html[data-cm-theme] #cm-collapse-tools:hover,
+html[data-cm-theme] #cm-collapse-tools:focus-visible {
+  background: var(--cm-accent);
+  color: var(--cm-accent-ink);
+}
+html[data-cm-theme] #partstools .button:not(.disabled) { color: var(--cm-ink); }
+html[data-cm-theme] #partstools .button:not(.disabled):hover { color: var(--cm-accent-ink); }
+
+/* C&M Designs v1.0.1 — unified button system (presentation only). */
+html[data-cm-theme] {
+  --cm-btn-radius: 7px;
+  --cm-btn-hover: #d8a979;
+}
+html[data-cm-theme] .button,
+html[data-cm-theme] #cm-panel-tabs button,
+html[data-cm-theme] #cm-materials-panel button,
+html[data-cm-theme] #cm-collapse-tools,
+html[data-cm-theme] #partstools button,
+html[data-cm-theme] #partstools input[type="button"],
+html[data-cm-theme] #partstools input[type="submit"] {
+  border-radius: var(--cm-btn-radius) !important;
+  box-sizing: border-box;
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+/* Consistent primary actions without changing their SVG icon backgrounds. */
+html[data-cm-theme] .topnav .button:not(.disabled),
+html[data-cm-theme] #partstools .button:not(.disabled),
+html[data-cm-theme] #partstools button:not(:disabled),
+html[data-cm-theme] #cm-materials-panel button:not(:disabled),
+html[data-cm-theme] #cm-panel-tabs button.selected {
+  background-color: var(--cm-accent) !important;
+  color: var(--cm-accent-ink) !important;
+  border-color: var(--cm-accent) !important;
+}
+html[data-cm-theme] .topnav .button:not(.disabled):hover,
+html[data-cm-theme] #partstools .button:not(.disabled):hover,
+html[data-cm-theme] #partstools button:not(:disabled):hover,
+html[data-cm-theme] #cm-materials-panel button:not(:disabled):hover,
+html[data-cm-theme] #cm-panel-tabs button:hover {
+  background-color: var(--cm-btn-hover) !important;
+  color: #1a1510 !important;
+  border-color: var(--cm-btn-hover) !important;
+}
+html[data-cm-theme] .button:focus-visible,
+html[data-cm-theme] #cm-panel-tabs button:focus-visible,
+html[data-cm-theme] #cm-materials-panel button:focus-visible,
+html[data-cm-theme] #cm-collapse-tools:focus-visible {
+  outline: 2px solid var(--cm-accent) !important;
+  outline-offset: 2px;
+}
+html[data-cm-theme] .button.disabled,
+html[data-cm-theme] #partstools button:disabled,
+html[data-cm-theme] #cm-materials-panel button:disabled {
+  background-color: var(--cm-panel) !important;
+  color: var(--cm-muted) !important;
+  border-color: var(--cm-border) !important;
+  filter: none !important;
+  opacity: .52;
+  cursor: not-allowed;
+}
+/* Square-ish corners for imported-file tabs and their close controls. */
+html[data-cm-theme] #importsnav li { border-radius: var(--cm-btn-radius) var(--cm-btn-radius) 0 0 !important; }
+/* Keep the lower-left collapse control visually aligned with other actions. */
+html[data-cm-theme] #cm-collapse-tools { background-color: var(--cm-accent); color: var(--cm-accent-ink); border-color: var(--cm-accent); }
+html[data-cm-theme] #cm-collapse-tools:hover { background-color: var(--cm-btn-hover); border-color: var(--cm-btn-hover); }
+
+/* C&M v1.0.1 — isolated, fixed-height global navigation slots.
+   Prevent the results icon/pseudo-element from overlapping About. */
+html[data-cm-theme] #sidenav {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+html[data-cm-theme] #sidenav > li {
+  box-sizing: border-box;
+  display: block;
+  float: none;
+  position: relative;
+  flex: 0 0 var(--nav-width);
+  width: var(--nav-width);
+  height: var(--nav-width);
+  min-height: var(--nav-width);
+  max-height: var(--nav-width);
+  cursor: pointer;
+}
+html[data-cm-theme] #sidenav > #home_tab {
+  flex-basis: var(--nav-width);
+  height: var(--nav-width);
+}
+html[data-cm-theme] #sidenav > #cm_results_tab {
+  background-image: none;
+  opacity: 1;
+}
+html[data-cm-theme] #sidenav > #cm_results_tab::after {
+  box-sizing: border-box;
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  width: 100%;
+  line-height: var(--nav-width);
+  background: transparent;
+  pointer-events: none;
+}
+html[data-cm-theme] #sidenav > #cm_results_tab.active::after,
+html[data-cm-theme] #sidenav > #cm_results_tab:hover::after {
+  background: transparent;
+}
+
+/* C&M Designs v1.0.1 — consistent icon navigation, accessible contrast. */
+html[data-cm-theme] #sidenav > li {
+  display: flex !important; align-items: center !important; justify-content: center !important;
+  background-image: none !important; filter: none !important; opacity: 1 !important;
+  color: #d5d5d5 !important; background-color: var(--cm-side) !important;
+  border-left: 3px solid transparent; cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: color .15s ease, background-color .15s ease;
+}
+html[data-cm-theme] #sidenav > li .cm-nav-icon {
+  display: block; width: 22px; height: 22px; flex: none;
+  position: static; margin: 0; transform: none; pointer-events: none;
+}
+html[data-cm-theme] #sidenav > #cm_results_tab::after { content: none !important; display: none !important; }
+html[data-cm-theme] #sidenav > li:hover {
+  background-color: #d8a979 !important; color: #1a1510 !important;
+}
+html[data-cm-theme] #sidenav > li.active,
+html[data-cm-theme] #sidenav > li.active:hover {
+  background-color: #c6935e !important; color: #1a1510 !important;
+  border-left-color: #a8743f;
+}
+html[data-cm-theme="light"] #sidenav > li:not(.active):not(:hover) {
+  color: #ededed !important;
+}
+
+
+/* C&M v1.0.1 — restore familiar icons with consistent Twine navigation. */
+html[data-cm-theme] #sidenav {
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+html[data-cm-theme] #sidenav > li {
+  box-sizing: border-box;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  position: relative !important;
+  float: none !important;
+  flex: 0 0 var(--nav-width);
+  width: var(--nav-width);
+  height: var(--nav-width) !important;
+  min-height: var(--nav-width);
+  padding: 0 !important;
+  background-image: none !important;
+  background-color: var(--cm-side) !important;
+  border-left: 3px solid transparent;
+  filter: none !important;
+  opacity: 1 !important;
+  cursor: pointer;
+  transition: background-color .15s ease;
+}
+html[data-cm-theme] #sidenav > li::before {
+  content: '';
+  display: block;
+  width: 21px;
+  height: 21px;
+  flex: 0 0 21px;
+  background-color: #d5d5d5;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  pointer-events: none;
+}
+html[data-cm-theme] #sidenav > #home_tab::before {
+  -webkit-mask-image: url(img/logosmall.svg);
+  mask-image: url(img/logosmall.svg);
+}
+html[data-cm-theme] #sidenav > #config_tab::before {
+  -webkit-mask-image: url(img/settings.svg);
+  mask-image: url(img/settings.svg);
+}
+html[data-cm-theme] #sidenav > #info_tab::before {
+  -webkit-mask-image: url(img/info.svg);
+  mask-image: url(img/info.svg);
+}
+html[data-cm-theme] #sidenav > #cm_results_tab::before {
+  content: '▤';
+  width: 22px;
+  height: 24px;
+  flex-basis: 22px;
+  background: transparent;
+  color: #d5d5d5;
+  -webkit-mask-image: none;
+  mask-image: none;
+  font-size: 22px;
+  font-weight: normal;
+  line-height: 24px;
+  text-align: center;
+}
+html[data-cm-theme] #sidenav > #cm_results_tab::after {
+  content: none !important;
+  display: none !important;
+}
+html[data-cm-theme] #sidenav > li:hover {
+  background-color: #d8a979 !important;
+}
+html[data-cm-theme] #sidenav > li.active,
+html[data-cm-theme] #sidenav > li.active:hover {
+  background-color: #c6935e !important;
+  border-left-color: #a8743f;
+}
+html[data-cm-theme] #sidenav > li:hover::before,
+html[data-cm-theme] #sidenav > li.active::before {
+  background-color: #1a1510;
+}
+html[data-cm-theme] #sidenav > #cm_results_tab:hover::before,
+html[data-cm-theme] #sidenav > #cm_results_tab.active::before {
+  color: #1a1510;
+}
+
+/* Resultados solo aparece tras obtener un anidado válido en esta sesión.
+   Esta regla vence el display:flex !important del menú lateral. */
+html[data-cm-theme] #sidenav > #cm_results_tab[aria-hidden="true"] {
+  display: none !important;
+}
+
+/* C&M v1.0.1 — Independent nesting workspace */
+html[data-cm-theme] #cm-home-nest-status[hidden] { display:none !important; }
+html[data-cm-theme] #cm-home-nest-status { margin:18px 22px 12px; padding:16px 20px; background:var(--cm-side,#303030); color:var(--cm-ink,#eee); border:1px solid #c6935e; border-radius:9px; max-width:680px; }
+html[data-cm-theme] .cm-home-nest-heading { display:flex; align-items:center; gap:10px; font-size:16px; }
+html[data-cm-theme] .cm-home-nest-details { margin:9px 0 12px; font-size:13px; line-height:1.5; }
+html[data-cm-theme] #cm-home-nest-open { background:#c6935e; color:#21170d; border:0; border-radius:7px; padding:9px 16px; cursor:pointer; font-weight:700; }
+html[data-cm-theme] #sidenav > #cm_results_tab.cm-running::after { content:'' !important; display:block !important; position:absolute; top:10px; right:10px; width:8px; height:8px; border-radius:50%; background:#c6935e; box-shadow:0 0 0 3px rgba(198,147,94,.22); animation:cm-pulse 1.5s ease-in-out infinite; }
+html[data-cm-theme] #sidenav > #cm_results_tab.cm-running.active::after { background:#1a1510; }
+html[data-cm-theme] #sidenav > #cm_results_tab[aria-hidden="true"] { display:none !important; }
+@keyframes cm-pulse { 50% { opacity:.35; transform:scale(.75); } }
+
+/* C&M v1.0.1 — nesting status readability and workspace selection */
+html[data-cm-theme] #home { position:relative; }
+html[data-cm-theme] #cm-home-nest-status:not([hidden]) {
+  box-sizing:border-box;
+  position:absolute;
+  top:12px;
+  right:16px;
+  left:auto;
+  width:min(340px, calc(100% - 105px));
+  max-width:none;
+  margin:0;
+  padding:12px 14px;
+  z-index:8;
+  overflow-wrap:anywhere;
+  white-space:normal;
+  background:#343434;
+  color:#f4f4f4;
+  border:1px solid #c6935e;
+  box-shadow:0 3px 12px rgba(0,0,0,.22);
+}
+html[data-cm-theme] #cm-home-nest-status .cm-home-nest-heading,
+html[data-cm-theme] #cm-home-nest-status .cm-home-nest-details {
+  color:#f4f4f4;
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+}
+html[data-cm-theme] #cm-home-nest-status .cm-home-nest-details { margin:7px 0 9px; }
+@media (max-width:720px) {
+  html[data-cm-theme] #cm-home-nest-status:not([hidden]) {
+    top:64px;
+    right:10px;
+    width:min(300px, calc(100% - 96px));
+  }
+}
+
+/* C&M — Nesting status shares the Import / Start toolbar, never overlays SVG tools. */
+html[data-cm-theme] #homecontent .topnav { box-sizing:border-box; }
+html[data-cm-theme] #homecontent .topnav #cm-home-nest-status:not([hidden]) {
+  position:relative !important;
+  inset:auto !important;
+  float:right !important;
+  display:flex !important;
+  flex-direction:row !important;
+  align-items:center !important;
+  justify-content:flex-end !important;
+  gap:10px !important;
+  box-sizing:border-box !important;
+  width:auto !important;
+  max-width:calc(100% - 310px) !important;
+  height:calc(var(--nav-width) - 0.875em) !important;
+  min-height:0 !important;
+  margin:0 12px 0 0 !important;
+  padding:0 10px !important;
+  background:transparent !important;
+  border:0 !important;
+  box-shadow:none !important;
+  border-radius:0 !important;
+  color:#eaeaea !important;
+  white-space:nowrap !important;
+  overflow:hidden !important;
+  z-index:auto !important;
+}
+html[data-cm-theme] #homecontent .topnav #cm-home-nest-status .cm-home-nest-heading {
+  display:flex; align-items:center; flex:none; gap:6px; margin:0;
+  font-size:12px; white-space:nowrap; color:#c6935e !important;
+}
+html[data-cm-theme] #homecontent .topnav #cm-home-nest-status .cm-home-nest-details {
+  display:block; flex:none; margin:0; font-size:12px; white-space:nowrap;
+  color:#dadada !important;
+}
+html[data-cm-theme] #homecontent .topnav #cm-home-nest-status .cm-home-nest-details {
+  font-size:0;
+}
+html[data-cm-theme] #homecontent .topnav #cm-home-nest-status .cm-home-nest-time {
+  font-size:12px;
+}
+html[data-cm-theme] #homecontent .topnav #cm-home-nest-status .cm-home-nest-time::before {
+  content:'Tiempo: '; font-size:12px;
+}
+html[data-cm-theme] #homecontent .topnav #cm-home-nest-open {
+  flex:none; margin:0; padding:7px 10px; font-size:11px;
+  -webkit-app-region:no-drag; cursor:pointer;
+}
+@media(max-width:900px){
+ html[data-cm-theme] #homecontent .topnav #cm-home-nest-status:not([hidden]) {gap:6px !important; margin-right:5px !important; padding:0 3px !important;}
+ html[data-cm-theme] #homecontent .topnav #cm-home-nest-status .cm-home-nest-heading strong {display:none;}
+}
+
+/* C&M v1.0.1 — read-only utilization and cost summary. */
+html[data-cm-theme] .cm-cost-summary {margin:1.1em 0 1.5em;padding:1em;border:1px solid var(--cm-border);border-radius:8px;background:var(--cm-panel);color:var(--cm-ink);font-size:.88em;overflow-wrap:anywhere;}
+html[data-cm-theme] .cm-cost-summary[hidden] {display:none!important;}
+html[data-cm-theme] .cm-cost-summary h2 {font-size:1.08em;margin:0 0 .8em;color:var(--cm-ink);}
+html[data-cm-theme] .cm-cost-meter {height:9px;border-radius:9px;background:var(--cm-border);overflow:hidden;}
+html[data-cm-theme] .cm-cost-meter span {display:block;height:100%;background:#C6935E;border-radius:9px;}
+html[data-cm-theme] .cm-cost-percent {text-align:right;font-weight:700;margin:.35em 0 .75em;}
+html[data-cm-theme] .cm-cost-row {display:flex;justify-content:space-between;gap:.7em;padding:.45em 0;border-bottom:1px solid var(--cm-border);align-items:baseline;}
+html[data-cm-theme] .cm-cost-row span {color:var(--cm-muted);min-width:0;}
+html[data-cm-theme] .cm-cost-row strong {text-align:right;flex-shrink:0;}
+html[data-cm-theme] .cm-cost-foot,html[data-cm-theme] .cm-cost-warning {font-size:.83em;line-height:1.45;margin:.8em 0 0;color:var(--cm-muted);}
+html[data-cm-theme] .cm-cost-warning {color:#C6935E;}
+
+/* C&M v1.0.1: make the results pane fill the full workspace height.
+   The legacy nestcontent height left an empty dark block at bottom-left. */
+html[data-cm-theme] #nestcontent {
+  height: calc(100% - var(--nav-width));
+  margin-bottom: 0;
+}
+html[data-cm-theme] #nestinfo {
+  height: 100%;
+  padding-bottom: 2em;
+}
+html[data-cm-theme] #cm-nest-partial-notice:not([hidden]) {
+  position: absolute;
+  z-index: 4;
+  right: 1em;
+  bottom: 1em;
+  max-width: min(60%, 480px);
+  padding: .8em 1em;
+  border: 1px solid #C6935E;
+  border-radius: 7px;
+  color: var(--cm-ink);
+  background: var(--cm-panel);
+  font-size: .85em;
+  line-height: 1.45;
+}
+
+/* C&M: seamless left result pane through the bottom of the window. */
+html[data-cm-theme] #nestcontent { height: calc(100% - 3.75em) !important; min-height:0; }
+html[data-cm-theme] #nestinfo { height:100% !important; min-height:100%; background:var(--cm-surface) !important; }
+html[data-cm-theme] #nest { background:var(--cm-surface); }
+html[data-cm-theme] #nestdisplay { background:var(--cm-workspace); }
+
+/* C&M: independent history archive controls. */
+html[data-cm-theme] #cm-save-nest,html[data-cm-theme] #cm-open-history {background:#C6935E;color:#21170d;border:0;border-radius:7px;padding:.65em 1em;cursor:pointer;margin:.4em .3em;font:inherit;font-size:.85em;}
+html[data-cm-theme] #cm-history-dialog[hidden],html[data-cm-theme] #cm-history-preview-wrap[hidden] {display:none!important;}
+html[data-cm-theme] #cm-history-dialog {position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.76);display:flex;align-items:center;justify-content:center;padding:2em;box-sizing:border-box;}
+html[data-cm-theme] .cm-history-window {box-sizing:border-box;background:var(--cm-panel);color:var(--cm-ink);border:1px solid var(--cm-border);border-radius:10px;padding:1.3em;width:min(850px,95vw);max-height:90vh;overflow:auto;box-shadow:0 10px 40px #0008;}
+html[data-cm-theme] .cm-history-window header {display:flex;align-items:center;justify-content:space-between;gap:1em;font-size:1.15em;}
+html[data-cm-theme] .cm-history-window p {color:var(--cm-muted);}
+html[data-cm-theme] .cm-history-window button {border:0;border-radius:6px;background:#C6935E;color:#21170d;padding:.55em .8em;cursor:pointer;font:inherit;}
+html[data-cm-theme] .cm-history-entry {border-top:1px solid var(--cm-border);padding:.9em 0;}
+html[data-cm-theme] .cm-history-entry-title {font-weight:700;}
+html[data-cm-theme] .cm-history-entry-meta {font-size:.85em;color:var(--cm-muted);margin:.35em 0 .6em;}
+html[data-cm-theme] .cm-history-entry-actions {display:flex;gap:.5em;flex-wrap:wrap;}
+html[data-cm-theme] #cm-history-preview-wrap {border-top:1px solid var(--cm-border);margin-top:1em;padding-top:1em;}
+html[data-cm-theme] #cm-history-preview {display:block;width:100%;height:320px;border:1px solid var(--cm-border);background:var(--cm-workspace);}
+html[data-cm-theme] #cm-history-preview-stats {white-space:pre-wrap;font:inherit;font-size:.85em;max-height:140px;overflow:auto;}
+html[data-cm-theme] #cm-history-save-wrap[hidden] {display:none!important;}
+html[data-cm-theme] #cm-history-save-wrap {display:flex;gap:.5em;align-items:center;flex-wrap:wrap;padding:.9em 0;}
+html[data-cm-theme] #cm-history-name {background:var(--cm-surface);color:var(--cm-ink);border:1px solid var(--cm-border);border-radius:6px;padding:.55em;min-width:200px;flex:1;}
+
+/* C&M: align results toolbar, including history controls */
+html[data-cm-theme] #nest > .topnav {display:flex!important;align-items:center!important;gap:8px!important;min-height:46px!important;box-sizing:border-box!important;}
+html[data-cm-theme] #nest > .topnav > li.button,
+html[data-cm-theme] #nest > .topnav > #export_wrapper > li.button,
+html[data-cm-theme] #nest > .topnav > button {box-sizing:border-box!important;height:30px!important;min-height:30px!important;margin:0!important;padding:0 13px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;line-height:1!important;vertical-align:middle!important;border-radius:7px!important;}
+html[data-cm-theme] #nest > .topnav > #export_wrapper {display:inline-flex!important;align-items:center!important;margin:0!important;}
+
+/* C&M v1.0.1: preserve the icon gutter in the results toolbar.
+   The previous 0 13px !important padding overlapped SVG background icons. */
+html[data-cm-theme] #nest > .topnav > #stopnest,
+html[data-cm-theme] #nest > .topnav > #export_wrapper > #export {
+  padding-left: 39px !important;
+  padding-right: 15px !important;
+  background-position: 13px center !important;
+  justify-content: flex-start !important;
+  white-space: nowrap !important;
+  width: auto !important;
+}
+html[data-cm-theme] #nest > .topnav > #stopnest.disabled {
+  background-image: none !important;
+  padding-left: 15px !important;
+  cursor: default !important;
+}
+
+/* C&M contextual help: matches Deepnest line-art explanation panels */
+#config .cm-help-panel{padding-top:5em;}
+#config .cm-help-panel .cm-help-svg{max-width:100%;height:auto;display:block;margin:0 0 24px;}
+#config .cm-help-panel h1{margin-top:12px;}
+#config .cm-help-panel p{font-size:13px;line-height:1.55;max-width:33em;}
+.cm-help-search{stroke-dasharray:460;stroke-dashoffset:460;animation:cm-help-draw 5s ease-in-out infinite;}
+.cm-help-laser{animation:cm-help-move 3s linear infinite;}
+.cm-help-dot{animation:cm-help-pulse 2s ease-in-out infinite;}
+@keyframes cm-help-draw{0%{stroke-dashoffset:460}60%,85%{stroke-dashoffset:0}100%{stroke-dashoffset:460}}
+@keyframes cm-help-move{to{stroke-dashoffset:-76}}
+@keyframes cm-help-pulse{0%,100%{opacity:.25}50%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.cm-help-search,.cm-help-laser,.cm-help-dot{animation:none!important}.cm-help-search{stroke-dashoffset:0}}
+
+#config .cm-laser-settings-note{font-size:12px;line-height:1.55;color:#b9bdc4;max-width:340px;margin:8px 0 16px;}
+html[data-cm-theme="light"] #config .cm-laser-settings-note{color:#555d65;}
+
+/* C&M v1.0.1: dedicated, opaque optimization stage. No overlapping SVGs. */
+#nest #cm-nest-progress {
+  position: absolute !important;
+  top: 118px !important;
+  right: 0 !important;
+  left: auto !important;
+  width: 72% !important;
+  height: calc(100% - 118px) !important;
+  box-sizing: border-box !important;
+  background: var(--cm-workspace, #242629) !important;
+  z-index: 15 !important;
+  display: none !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-direction: column !important;
+  padding: 20px !important;
+  pointer-events: none !important;
+}
+#nest #cm-nest-progress.visible { display: flex !important; }
+#nest #cm-nest-progress .cm-brand-art { display:block !important; width:min(52%, 380px) !important; }
+#nest #cm-nest-progress .cm-brand-caption,
+#nest #cm-nest-progress .cm-brand-percent,
+#nest #cm-nest-progress .cm-brand-hint { display:block !important; }
+@media(max-width:1050px) { #nest #cm-nest-progress {width:66% !important;} }
+
+/* C&M v1.0.1 — cover the entire SVG preview while optimizing.
+   The progress layer is a sibling of #nestcontent and #nestdisplay.
+   The previous 118px top offset exposed the upper edge of the sheet. */
+html[data-cm-theme] #nest > #cm-nest-progress {
+  top: 3.75em !important;
+  bottom: 0 !important;
+  right: 0 !important;
+  left: auto !important;
+  width: 72% !important;
+  height: calc(100% - 3.75em) !important;
+  background: var(--cm-workspace, #242629) !important;
+  z-index: 30 !important;
+}
+@media (max-width: 1050px) {
+  html[data-cm-theme] #nest > #cm-nest-progress { width: 66% !important; }
+}
+
+/* C&M v1.0.1 — validation notice respects the active theme. */
+html[data-cm-theme] #messagewrapper {
+  position:fixed!important;
+  top:78px!important;
+  right:24px!important;
+  left:auto!important;
+  max-width:min(440px,calc(100vw - 105px))!important;
+  width:max-content!important;
+  box-sizing:border-box!important;
+  padding:0!important;
+  background:none!important;
+  background-image:none!important;
+  color:var(--cm-ink)!important;
+  z-index:1000!important;
+  pointer-events:none;
+}
+html[data-cm-theme] #messagewrapper.active {pointer-events:auto;}
+html[data-cm-theme] #messagewrapper #message {
+  display:flex!important;
+  flex-direction:row-reverse!important;
+  align-items:flex-start!important;
+  gap:12px!important;
+  padding:14px 15px!important;
+  background:var(--cm-panel)!important;
+  color:var(--cm-ink)!important;
+  border:1px solid var(--cm-border)!important;
+  border-left:3px solid var(--cm-accent)!important;
+  border-radius:8px!important;
+  box-shadow:0 8px 24px rgba(0,0,0,.22)!important;
+}
+html[data-cm-theme] #messagewrapper #messagecontent {
+  float:none!important;
+  flex:1 1 auto!important;
+  min-width:0!important;
+  max-width:350px!important;
+  font-size:13px!important;
+  line-height:1.45!important;
+  color:var(--cm-ink)!important;
+  overflow-wrap:anywhere!important;
+}
+html[data-cm-theme] #messagewrapper #message .close {
+  float:none!important;
+  flex:0 0 24px!important;
+  width:24px!important;
+  height:24px!important;
+  margin:0!important;
+  padding:0!important;
+  border-radius:5px!important;
+  background-color:var(--cm-accent)!important;
+  color:var(--cm-accent-ink)!important;
+}
+html[data-cm-theme] #messagewrapper #message.error {color:var(--cm-ink)!important;}
+
+/* C&M v1.0.1: one home nesting action, with a separate running status indicator. */
+html[data-cm-theme] #homecontent .topnav #cm-home-nest-open { display:none !important; }
+html[data-cm-theme] #homecontent .topnav #startnest.cm-view-nest {
+  opacity:1 !important; cursor:pointer !important; pointer-events:auto !important;
+}

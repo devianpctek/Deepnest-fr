@@ -1,0 +1,32 @@
+# Dependencias
+/node_modules/
+
+# Compilaciones y paquetes
+/dist/
+/build/
+/out/
+
+# Respaldos
+*.bak
+*.bak.*
+*.bak-*
+*.backup
+*.backup.*
+*.orig
+*~
+/respaldo-v101-*/
+/respaldos/
+
+# Archivos temporales
+*.log
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+
+# Paquetes temporales en la raíz
+/main.zip
+
+# Configuración local
+.env
+.env.local

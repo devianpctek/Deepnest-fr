@@ -56,6 +56,53 @@
 		var displayCallback = null;
 		// a running list of placements
 		this.nests = [];
+
+        // C&M: remember the best *valid* placement for identical geometry/settings.
+        // This is a result cache, not a seed for the genetic population.
+        var cmCacheKey = null;
+        var cmKnownBest = null;
+        var cmCachePrefix = 'cm-deepnest-best-v1:';
+        function cmCountPlaced(result){
+            if(!result || !Array.isArray(result.placements)) return 0;
+            return result.placements.reduce(function(n, sheet){
+                return n + (sheet && Array.isArray(sheet.sheetplacements) ? sheet.sheetplacements.length : 0);
+            }, 0);
+        }
+        function cmBetter(a,b){
+            if(!a) return false;
+            if(!b) return true;
+            var ac=cmCountPlaced(a), bc=cmCountPlaced(b);
+            if(ac !== bc) return ac > bc;
+            var as=a.placements.length, bs=b.placements.length;
+            if(as !== bs) return as < bs;
+            return Number(a.fitness) < Number(b.fitness);
+        }
+        function cmHash(value){
+            return require('crypto').createHash('sha256').update(value).digest('hex');
+        }
+        function cmRemember(result){
+            if(!cmCacheKey || !result || !cmCountPlaced(result)) return;
+            if(!cmBetter(result,cmKnownBest)) return;
+            try{
+                // JSON clone prevents a later UI mutation (e.g. selected) from changing the saved record.
+                var snapshot=JSON.parse(JSON.stringify(result));
+                delete snapshot.selected;
+                cmKnownBest=snapshot;
+                localStorage.setItem(cmCachePrefix + cmCacheKey,JSON.stringify(snapshot));
+            }catch(e){console.warn('[C&M] No se pudo guardar el mejor acomodo',e);}
+        }
+        function cmLoadBest(){
+            cmKnownBest=null;
+            if(!cmCacheKey) return;
+            try{
+                var raw=localStorage.getItem(cmCachePrefix + cmCacheKey);
+                if(raw){
+                    var saved=JSON.parse(raw);
+                    if(cmCountPlaced(saved)>0 && Array.isArray(saved.placements)) cmKnownBest=saved;
+                }
+            }catch(e){console.warn('[C&M] No se pudo recuperar el acomodo anterior',e);}
+        }
+
 		
 		this.importsvg = function(filename, dirpath, svgstring, scalingFactor, dxfFlag){
 			// No registrar importaciones vacías ni modificar la lista de piezas si falla el parser.
@@ -948,6 +995,17 @@
 				}
 			}
 						
+            // Fingerprint uses source geometry, quantities, sheet geometry and all
+            // placement settings. It excludes the time limit (search-only setting).
+            // Identical jobs may reuse their best previous placement, different jobs cannot.
+            try{
+                cmCacheKey=cmHash(JSON.stringify({
+                    parts:parts.map(function(part){return {quantity:part.quantity,sheet:part.sheet,polygon:part.polygontree};}),
+                    config:config
+                }));
+                cmLoadBest();
+            }catch(e){cmCacheKey=null;cmKnownBest=null;console.warn('[C&M] Sin caché para este trabajo',e);}
+
 			// offset tree recursively
 			function offsetTree(t, offset, offsetFunction, simpleFunction, inside){
 				var simple = t;
@@ -1004,17 +1062,18 @@
 			GA.population[payload.index].processing = false;
 			GA.population[payload.index].fitness = payload.fitness;
 			
-			// render placement
-			if(this.nests.length == 0 || this.nests[0].fitness > payload.fitness ){
-				this.nests.unshift(payload);
-				
-				if(this.nests.length > 10){
-					this.nests.pop();
-				}
-				if(displayCallback){
-					displayCallback();
-				}
-			}
+            // A complete solution on fewer sheets always beats one on more sheets.
+            // Recover the cached best only after the new run has returned a valid result,
+            // so the previous preview never appears while a new job is starting.
+            if(cmKnownBest && cmBetter(cmKnownBest,payload)){
+                payload=Object.assign({},cmKnownBest,{index:payload.index});
+            }
+            if(cmBetter(payload,this.nests[0])){
+                this.nests.unshift(payload);
+                if(this.nests.length>10) this.nests.pop();
+                cmRemember(payload);
+                if(displayCallback) displayCallback();
+            }
 		});
 		
 		this.launchWorkers = function(parts, config, progressCallback, displayCallback){

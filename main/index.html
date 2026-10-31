@@ -67,6 +67,87 @@
 				});
 			});
 			
+            // C&M: independent workspace navigation, without stopping optimization.
+            (function(){
+                const nav=document.getElementById('sidenav'), main=document.getElementById('main');
+                const nest=document.getElementById('nest'), results=document.getElementById('cm_results_tab');
+                if(!nav || !main || !nest || !results) return;
+                document.body.appendChild(nav);
+                function working(){return Boolean(window.DeepNest && DeepNest.working);}
+                function hasResult(){return Boolean(window.DeepNest && Array.isArray(DeepNest.nests) && DeepNest.nests.some(n=>n && Array.isArray(n.placements) && n.placements.some(p=>p && Array.isArray(p.sheetplacements) && p.sheetplacements.length>0)));}
+                function activate(id){nav.querySelectorAll('li').forEach(li=>li.classList.toggle('active',li.id===id));}
+                function showPage(page){
+                    main.classList.add('active'); nest.classList.remove('active');
+                    document.body.classList.remove('cm-nest-overlay');
+                    main.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id===page));
+                    activate(page==='home'?'home_tab':page==='config'?'config_tab':'info_tab');
+                    if(page==='home' && typeof resize==='function') resize();
+                }
+                function showNest(){
+                    if(!working() && !hasResult() && !nest.classList.contains('active')) return;
+                    main.classList.remove('active'); nest.classList.add('active');
+                    document.body.classList.remove('cm-nest-overlay'); activate('cm_results_tab');
+                    if(typeof resize==='function') resize();
+                }
+                function refresh(){
+                    const active=working(), available=active || hasResult();
+                    results.style.setProperty('display',available?'flex':'none','important');
+                    results.setAttribute('aria-hidden',available?'false':'true');
+                    results.classList.toggle('cm-running',active);
+                    // Reuse the main action to open the current/last nest instead of starting a second run.
+                    const homeAction=document.getElementById('startnest');
+                    if(homeAction){
+                        const lang=document.getElementById('cm-interface-language');
+                        const english=lang && lang.value==='en';
+                        const paused=Boolean(window.cmNestIsPaused && window.cmNestIsPaused());
+                        const label=active ? (english?'View nesting':'Ver anidado')
+                          : paused ? (english?'View paused nest':'Ver anidado')
+                          : hasResult() ? (english?'View last nest':'Ver último anidado')
+                          : (english?'Start nest':'Iniciar anidado');
+                        if(homeAction.textContent.trim()!==label) homeAction.textContent=label;
+                        homeAction.dataset.cmViewNest=available?'true':'false';
+                        homeAction.classList.toggle('cm-view-nest',available);
+                        if(available) homeAction.classList.remove('disabled');
+                    }
+                    const status=document.getElementById('cm-home-nest-status');
+                    if(status){
+                        // The Ractive toolbar is created after page initialization.
+                        // Dock the indicator inside that toolbar instead of overlaying SVG controls.
+                        const toolbar=home.querySelector('#homecontent > .topnav') || home.querySelector('#homecontent .topnav');
+                        if(toolbar && status.parentElement !== toolbar) toolbar.appendChild(status);
+                        status.hidden=!active;
+                        if(active){
+                            const elapsed=Math.max(0,Date.now()-(window.cmNestStartedAt||Date.now()));
+                            const label=status.querySelector('.cm-home-nest-time');
+                            if(label) label.textContent=Math.floor(elapsed/60000)+':'+String(Math.floor(elapsed/1000)%60).padStart(2,'0');
+                        }
+                    }
+                }
+                nav.addEventListener('click',function(ev){
+                    const item=ev.target.closest('li'); if(!item || !nav.contains(item)) return;
+                    ev.preventDefault(); ev.stopImmediatePropagation();
+                    if(item.id==='cm_results_tab') showNest();
+                    else if(item.id==='home_tab') showPage('home');
+                    else if(item.id==='config_tab') showPage('config');
+                    else if(item.id==='info_tab') showPage('info');
+                    refresh();
+                },true);
+                document.addEventListener('click',function(ev){
+                    if(ev.target.closest('#cm-home-nest-open')) showNest();
+                    const action=ev.target.closest('#startnest');
+                    if(action && (working() || hasResult())){
+                        ev.preventDefault();
+                        ev.stopImmediatePropagation();
+                        showNest();
+                    }
+                },true);
+                window.cmRefreshNestNavigation=refresh;
+                window.cmShowNestWorkspace=showNest;
+                refresh();
+                const timer=window.setInterval(refresh,500);
+                window.addEventListener('beforeunload',()=>window.clearInterval(timer));
+            })();
+
 			// config form
 			const config = require('electron-settings');
 			window.config = config;
@@ -415,58 +496,65 @@
 				if(importControl) importControl.className = 'button import';
 			});
 			
-			// applies svg zoom library to the currently visible import
-			applyzoom = function(){
-				if(DeepNest.imports.length > 0){
-					for(var i=0; i<DeepNest.imports.length; i++){
-						if(DeepNest.imports[i].selected){
-							if(DeepNest.imports[i].zoom){
-								var pan = DeepNest.imports[i].zoom.getPan();
-								var zoom = DeepNest.imports[i].zoom.getZoom();
-							}
-							else{
-								var pan = false;
-								var zoom = false;
-							}
-							DeepNest.imports[i].zoom = svgPanZoom('#import-'+i+' svg', {
-								  zoomEnabled: true,
-								  controlIconsEnabled: false,
-								  fit: true,
-								  center: true,
-								  maxZoom: 50,
-								  minZoom: 0.1
-							});
-							
-							if(zoom){
-								DeepNest.imports[i].zoom.zoom(zoom);
-							}
-							if(pan){
-								DeepNest.imports[i].zoom.pan(pan);
-							}
-							
-							document.querySelector('#import-'+i+' .zoomin').addEventListener('click', function(ev){
-							  ev.preventDefault();
-							  DeepNest.imports.find(function(e){
-							  	return e.selected;
-							  }).zoom.zoomIn();
-							});
-							document.querySelector('#import-'+i+' .zoomout').addEventListener('click', function(ev){
-							  ev.preventDefault();
-							  DeepNest.imports.find(function(e){
-							  	return e.selected;
-							  }).zoom.zoomOut();
-							});
-							document.querySelector('#import-'+i+' .zoomreset').addEventListener('click', function(ev){
-							  ev.preventDefault();
-							  DeepNest.imports.find(function(e){
-							  	return e.selected;
-							  }).zoom.resetZoom().resetPan();
-							});
-						}
-					}
-				}
-			};
-						
+			// C&M: initialize the preview only after the selected tab is visible.
+            // Batch imports render several tabs asynchronously; fitting hidden SVGs
+            // produces invalid geometry/viewport sizes. This never changes source SVGs.
+            var cmFitFrame = 0;
+            applyzoom = function(){
+                if(cmFitFrame) cancelAnimationFrame(cmFitFrame);
+                cmFitFrame = requestAnimationFrame(function(){
+                    cmFitFrame = requestAnimationFrame(function(){
+                        cmFitFrame = 0;
+                        var i = DeepNest.imports.findIndex(function(im){ return im.selected; });
+                        if(i < 0) return;
+                        var im = DeepNest.imports[i];
+                        var panel = document.getElementById('import-'+i);
+                        var svg = panel && panel.querySelector('svg');
+                        if(!svg || !panel.classList.contains('active') ||
+                           !panel.clientWidth || !panel.clientHeight) return;
+
+                        // A renderer refresh can replace the SVG node. Do not reuse a
+                        // svg-pan-zoom instance pointing at a detached element.
+                        if(im.zoom && im.cmZoomElement !== svg){
+                            try { im.zoom.destroy(); } catch(e){}
+                            im.zoom = null;
+                            im.cmZoomElement = null;
+                        }
+                        if(!im.zoom){
+                            try {
+                                var artwork = svg.getBBox();
+                                if(artwork && artwork.width > 0 && artwork.height > 0 &&
+                                   [artwork.x,artwork.y,artwork.width,artwork.height].every(Number.isFinite)){
+                                    var pad = Math.max(artwork.width,artwork.height)*0.06;
+                                    svg.setAttribute('viewBox', [artwork.x-pad,artwork.y-pad,
+                                        artwork.width+2*pad,artwork.height+2*pad].join(' '));
+                                }
+                            } catch(e){ console.warn('Preview fit skipped:',e); }
+                            im.zoom = svgPanZoom(svg, {
+                                zoomEnabled: true, controlIconsEnabled: false,
+                                fit: true, center: true, maxZoom: 50, minZoom: 0.1
+                            });
+                            im.cmZoomElement = svg;
+                            ['zoomin','zoomout','zoomreset'].forEach(function(action){
+                                var button = panel.querySelector('.'+action);
+                                if(!button) return;
+                                button.onclick = function(ev){
+                                    ev.preventDefault();
+                                    var selected = DeepNest.imports.find(function(x){return x.selected;});
+                                    if(!selected || !selected.zoom) return;
+                                    if(action === 'zoomin') selected.zoom.zoomIn();
+                                    else if(action === 'zoomout') selected.zoom.zoomOut();
+                                    else selected.zoom.resetZoom().resetPan();
+                                };
+                            });
+                        }
+                        // On every tab activation, recompute the viewport dimensions.
+                        // Keep user pan/zoom for already initialized tabs.
+                        else if(typeof im.zoom.resize === 'function') im.zoom.resize();
+                    });
+                });
+            };
+
 			ractive.on('importselecthandler', function (e, im) {
 				if(im.selected){
 					return false;
@@ -731,8 +819,8 @@
 					ractive.update('imports');
 					ractive.update('parts');
 					attachSort();
-					applyzoom();
 					resize();
+					applyzoom();
 					return true;
 				} catch (err) {
 					console.error('[IMPORT ERROR] ' + filename + ':', err);
@@ -789,12 +877,20 @@
 				return false;
 			};
 			
+			// C&M: collapse the lower editor without changing pieces or materials.
+            document.addEventListener('click', function(ev){
+                var toggle = ev.target.closest('#cm-collapse-tools');
+                if(!toggle) return;
+                ev.preventDefault();
+                document.getElementById('partstools').classList.remove('active');
+            });
 			// add rectangle
 			document.querySelector('#addrectangle').onclick = function(){
 				var tools = document.querySelector('#partstools');
 				var dialog = document.querySelector('#rectangledialog');
 				
 				tools.className = 'active';
+                document.dispatchEvent(new CustomEvent('cm:panel-tab',{detail:'rect'}));
 			};
 			
 			document.querySelector('#cancelrectangle').onclick = function(){
@@ -830,7 +926,22 @@
 				rect.setAttribute('width',width.value*conversion);
 				rect.setAttribute('height',height.value*conversion);
 				svg.appendChild(rect);
+                var cmPriceInput = document.getElementById('cm-rectangle-price');
+                var cmPriceText = cmPriceInput ? cmPriceInput.value.trim() : '';
+                var cmPrice = cmPriceText === '' ? null : Number(cmPriceText);
+                if(cmPrice !== null && (!Number.isFinite(cmPrice) || cmPrice < 0)){
+                    if(cmPriceInput) cmPriceInput.className = 'error';
+                    return false;
+                }
+                var cmBefore = DeepNest.parts.length;
 				DeepNest.importsvg(null, null, (new XMLSerializer()).serializeToString(svg));
+                if(DeepNest.parts.length > cmBefore){
+                    var cmCreated = DeepNest.parts[DeepNest.parts.length - 1];
+                    if(cmPrice !== null) cmCreated.cmSheetCost = cmPrice;
+                    document.dispatchEvent(new CustomEvent('cm:rectangle-created',{detail:{part:cmCreated,cost:cmPrice}}));
+                }
+                if(cmPriceInput){ cmPriceInput.value = ''; cmPriceInput.className = ''; }
+
 				
 				width.className = '';
 				height.className = '';
@@ -921,6 +1032,7 @@
 			// v7 production limits. Optimization remains manually stoppable.
 			var productionWatchdog = null;
 			var productionStarted = 0;
+            var cmElapsedBeforePause = 0;
 			var productionLastImprovement = 0;
 			var productionBestSheets = Infinity;
 			var productionBestPlaced = -1;
@@ -930,7 +1042,7 @@
 			function updateBrandProgress(){
                 var overlay = document.querySelector('#cm-nest-progress');
                 if(!overlay) return;
-                var elapsed = Math.max(0, Date.now() - productionStarted);
+                var elapsed = Math.max(0, cmElapsedBeforePause + (DeepNest.working ? Date.now() - productionStarted : 0));
                 var maxMinutes = Number(config.getSync('optimizationMinutes') || 0);
                 var percent = maxMinutes > 0 ? Math.min(DeepNest.nests.some(function(n){return countNestPieces(n)>0;}) ? 100 : 99, Math.round(elapsed / (maxMinutes*60*1000) * 100)) : 0;
                 var fill = overlay.querySelector('.cm-brand-color');
@@ -947,7 +1059,38 @@
                 var overlay = document.querySelector('#cm-nest-progress');
                 if(overlay) overlay.classList.remove('visible');
             }
-            function clearProductionWatchdog(){
+                        // Clear the previous job before beginning another one. A previous
+            // preview is not a result of the current optimization.
+            function clearPreviousNestingJob(){
+                clearProductionWatchdog();
+                hideBrandProgress();
+                if(DeepNest.working){
+                    ipcRenderer.send('background-stop');
+                    DeepNest.stop();
+                }
+                DeepNest.reset();
+                var preview=document.querySelector('#nestdisplay');
+                if(preview) preview.replaceChildren();
+                if(window.nest && typeof window.nest.update==='function') window.nest.update('nests');
+                var exportWrapper=document.querySelector('#export_wrapper');
+                if(exportWrapper) exportWrapper.classList.remove('active');
+                var exportButton=document.querySelector('#export');
+                if(exportButton) exportButton.className='button export disabled';
+                var notice=document.querySelector('#cm-nest-partial-notice');
+                if(notice){notice.hidden=true;notice.textContent='';}
+                if(typeof window.cmRefreshNestNavigation==='function') window.cmRefreshNestNavigation();
+            }
+            function reportNestingCompletion(){
+                hideBrandProgress();
+                var notice=document.querySelector('#cm-nest-partial-notice');
+                if(!notice) return;
+                var best=DeepNest.nests.reduce(function(a,n){return Math.max(a,countNestPieces(n));},0);
+                if(productionTarget>0 && best<productionTarget){
+                    notice.textContent='Resultado parcial: '+best+' de '+productionTarget+' piezas acomodadas. Revisa el material disponible y las dimensiones antes de exportar.';
+                    notice.hidden=false;
+                }else{notice.hidden=true;notice.textContent='';}
+            }
+function clearProductionWatchdog(){
 				if(productionWatchdog !== null){ clearInterval(productionWatchdog); productionWatchdog = null; }
 			}
 			function countNestPieces(n){
@@ -956,10 +1099,11 @@
 					return total + (Array.isArray(sheet.sheetplacements) ? sheet.sheetplacements.length : 0);
 				}, 0);
 			}
-			function startProductionWatchdog(){
+			function startProductionWatchdog(resuming){
 				clearProductionWatchdog();
 				productionTarget = DeepNest.parts.filter(function(p){return !p.sheet;}).reduce(function(n,p){return n + Number(p.quantity || 0);},0);
-				productionStarted = Date.now();
+				if(!resuming) cmElapsedBeforePause = 0;
+                productionStarted = Date.now();
                 showBrandProgress();
 				productionLastImprovement = productionStarted;
 				productionBestSheets = Infinity;
@@ -967,7 +1111,7 @@
 				productionStopReason = '';
                 productionWaitingNotice = false;
 				productionWatchdog = setInterval(function(){
-					if(!DeepNest.working){clearProductionWatchdog();return;}
+					if(!DeepNest.working){clearProductionWatchdog();reportNestingCompletion();return;}
 					var now = Date.now();
                     updateBrandProgress();
 					DeepNest.nests.forEach(function(n){
@@ -981,7 +1125,7 @@
 					var maxMinutes = Number(config.getSync('optimizationMinutes'));
                     var stallSeconds = Number(config.getSync('optimizationStallSeconds'));
                     var autoStop = config.getSync('optimizationAutoStop') !== false;
-                    if(maxMinutes > 0 && now-productionStarted >= maxMinutes*60*1000){
+                    if(maxMinutes > 0 && cmElapsedBeforePause + now-productionStarted >= maxMinutes*60*1000){
                         productionStopReason = 'Límite de optimización alcanzado: ' + maxMinutes + ' minutos.';
                     }else if(autoStop && stallSeconds > 0 && productionTarget > 0 && productionBestPlaced >= productionTarget && now-productionLastImprovement >= stallSeconds*1000){
                         productionStopReason = 'Sin mejoras durante ' + stallSeconds + ' segundos con todas las piezas colocadas.';
@@ -1001,13 +1145,15 @@
                     }
 					clearProductionWatchdog();
 					var stopButton = document.querySelector('#stopnest');
-					if(stopButton && stopButton.className === 'button stop') stopButton.click();
-					else { ipcRenderer.send('background-stop'); DeepNest.stop(); }
+					if(stopButton && DeepNest.working){ ipcRenderer.send('background-stop'); DeepNest.stop(); cmPaused = false; cmSyncStopButton(); }
+					else { ipcRenderer.send('background-stop'); DeepNest.stop(); cmPaused = false; cmSyncStopButton(); }
 					console.info('[Deepnest v7]',productionStopReason, 'Mejor resultado:', productionBestPlaced + '/' + productionTarget, 'piezas en', productionBestSheets, 'hojas');
+                    reportNestingCompletion();
 				}, 2000);
 			}
 
 			var startnest = function(){
+                window.cmNestStartedAt = Date.now();
 				/*function toClipperCoordinates(polygon){
 					var clone = [];
 					for(var i=0; i<polygon.length; i++){
@@ -1081,10 +1227,13 @@
 				
 				for(var i=0; i<DeepNest.parts.length; i++){
 					if(DeepNest.parts[i].sheet){
-						if(!configureAutomaticSheets()) return;
-						// need at least one sheet
+                        if(!configureAutomaticSheets()) return;
+                        clearPreviousNestingJob();
+                        cmPaused = false;
+                        // need at least one sheet
 						document.querySelector('#main').className = '';
 						document.querySelector('#nest').className = 'active';
+                        if(typeof window.cmShowNestWorkspace === 'function') window.cmShowNestWorkspace();
 						
 						var displayCallback = function(){
 							// render latest nest if none are selected
@@ -1098,7 +1247,6 @@
 									n.selected = false;
 								});
 								displayNest(this.DeepNest.nests[0]);
-                                hideBrandProgress();
 								this.DeepNest.nests[0].selected = true;
 							}
 							
@@ -1111,93 +1259,54 @@
 						
 						deleteCache();
 						
-						DeepNest.start(null, displayCallback.bind(window));
+						// C&M: dismiss validation notices when a valid nesting starts.
+                        var cmNotice = document.getElementById('messagewrapper');
+                        if (cmNotice) { cmNotice.classList.remove('active'); cmNotice.style.display = 'none'; }
+                        cmResumeCallback = displayCallback.bind(window);
+                        DeepNest.start(null, cmResumeCallback);
+                        cmSyncStopButton();
+                        if(typeof window.cmRefreshNestNavigation === 'function') window.cmRefreshNestNavigation();
 						startProductionWatchdog();
 						return;
 					}
 				}
 				
 				if(DeepNest.parts.length == 0){
-					message("Please import some parts first");
+					message(document.getElementById("cm-interface-language")?.value === "en" ? "Import at least one part before starting nesting." : "Importa al menos una pieza antes de iniciar el anidado.");
 				}
 				else{
-					message("Please mark at least one part as the sheet");
+					message(document.getElementById("cm-interface-language")?.value === "en" ? "Select at least one part as a material sheet before starting nesting." : "Selecciona al menos una pieza como hoja de material antes de iniciar el anidado.");
 				}
 			}
 			
 			document.querySelector('#startnest').onclick = startnest;
 			
 			var stop = document.querySelector('#stopnest');
+            var cmPaused = false;
+            var cmResumeCallback = null;
+            function cmSyncStopButton(){
+                if(!stop) return;
+                stop.className = DeepNest.working ? 'button stop' : (cmPaused ? 'button start' : 'button stop disabled');
+                stop.textContent = DeepNest.working ? 'Detener anidado' : (cmPaused ? 'Reanudar anidado' : 'Anidado finalizado');
+            }
+            window.cmSyncStopButton = cmSyncStopButton;
+            window.cmNestIsPaused = function(){ return cmPaused; };
 			stop.onclick = function(e){
-				if(stop.className == 'button stop'){
-					clearProductionWatchdog();
-                    hideBrandProgress();
-					ipcRenderer.send('background-stop');
-					DeepNest.stop();
-					document.querySelectorAll('li.progress').forEach(function(p){
-						p.removeAttribute('id');
-						p.className = 'progress';
-					});
-					stop.className = 'button stop disabled';
-					setTimeout(function(){
-						stop.className = 'button start';
-						stop.innerHTML = 'Start nest';
-					}, 3000);
-				}
-				else if(stop.className == 'button start'){
-					stop.className = 'button stop disabled';
-					setTimeout(function(){
-						stop.className = 'button stop';
-						stop.innerHTML = 'Stop nest';
-					}, 1000);
-					startnest();
-				}
-			}
-			
-            // Keep the last valid nesting result when navigating back to the editor.
-            function lastValidNest(){
-                return DeepNest.nests.find(function(n){
-                    return n && Array.isArray(n.placements) && n.placements.length > 0;
-                });
-            }
-            function updateResumeButton(){
-                var button = document.querySelector('#resume-last-nest');
-                if(button) button.style.display = lastValidNest() ? '' : 'none';
-            }
-            document.querySelector('#homecontent').addEventListener('click', function(event){
-                var button = event.target.closest('#resume-last-nest');
-                if(!button) return;
-                var last = DeepNest.nests.find(function(n){return n.selected && n.placements && n.placements.length;}) || lastValidNest();
-                if(!last) return;
-                document.querySelector('#main').className = '';
-                document.querySelector('#nest').className = 'active';
-                displayNest(last);
-                window.nest.update('nests');
-                document.querySelector('#export_wrapper').className = 'active';
-                document.querySelector('#export').className = 'button export';
-                resize();
-            });
-            var back = document.querySelector('#back');
-            back.onclick = function(e){
-                clearProductionWatchdog();
-                hideBrandProgress();
                 if(DeepNest.working){
-                    ipcRenderer.send('background-stop');
-                    DeepNest.stop();
-                    document.querySelectorAll('li.progress').forEach(function(p){
-                        p.removeAttribute('id');
-                        p.className = 'progress';
-                    });
+                    cmElapsedBeforePause += Math.max(0, Date.now() - productionStarted);
+                    clearProductionWatchdog(); hideBrandProgress();
+                    ipcRenderer.send('background-stop'); DeepNest.stop();
+                    cmPaused = true; cmSyncStopButton();
+                    if(window.cmRefreshNestNavigation) window.cmRefreshNestNavigation();
+                } else if(cmPaused){
+                    cmPaused = false;
+                    DeepNest.start(null, cmResumeCallback);
+                    startProductionWatchdog(true); cmSyncStopButton();
+                    if(window.cmRefreshNestNavigation) window.cmRefreshNestNavigation();
                 }
-                // Do not call DeepNest.reset(), deleteCache(), or clear #nestdisplay here.
-                // Those actions would discard the best result and prevent returning to it.
-                stop.className = 'button start';
-                stop.innerHTML = 'Start nest';
-                document.querySelector('#main').className = 'active';
-                document.querySelector('#nest').className = '';
-                updateResumeButton();
-                resize();
             };
+
+            // Navigation does not stop the optimizer; Stop nest is the explicit stop action.
 
 			var exportbutton = document.querySelector('#export');
 			
@@ -1205,7 +1314,7 @@
 			exportsvg.onclick = function(){
 				
 				var dialog = app.dialog;
-				dialog.showSaveDialog({title: 'Export Deepnest SVG'}).then(function (result) {
+				dialog.showSaveDialog({title: 'Exportar anidado SVG', defaultPath: 'CM_Anidado_' + new Date().toISOString().slice(0,10) + '.svg', filters: [{name:'SVG',extensions:['svg']}]}).then(function (result) {
 					var fileName = result.canceled ? undefined : result.filePath;
 					if(fileName === undefined){
 						console.log("No file selected");
@@ -1869,7 +1978,7 @@
 	<body>
 	<div id="nest">
 		<ul class="topnav">
-			<li class="button stop" id="stopnest">Stop nest</li>
+			<li class="button stop disabled" id="stopnest">Anidado finalizado</li>
 			<span id="export_wrapper">
 			<li class="button export disabled" id="export">Export</li>
 			<ul class="dropdown">
@@ -1879,7 +1988,7 @@
 				<!--<li id="exportgcode">GCode file</li>-->
 			</ul>
 			</span>
-			<li class="button back" id="back">Back</li>
+
 			
 			<!-- progress bars -->
 			<li class="progress">
@@ -1898,6 +2007,7 @@
 		
 		<div id="nestcontent"></div>
 		<div id="nestdisplay"></div>
+        <div id="cm-nest-partial-notice" role="status" hidden></div>
         <div id="cm-nest-progress" aria-live="off">
           <div class="cm-brand-art">
             <img class="cm-brand-gray" src="img/cm-designs-logo.png" alt="C&amp;M Designs" />
@@ -1914,6 +2024,7 @@
 				<div class="group"><h1>{{ getPartsPlaced() }}</h1><span class="label">parts placed</span></div>
 				<div class="group"><h1>{{ getTimeSaved() }}</h1><span class="label">laser time saved</span></div>
                 <div class="group"><h1>{{ getLaserEstimate() }}</h1><span class="label">estimated total laser time (approx.)</span></div>
+				<div id="cm-cost-summary" class="cm-cost-summary" data-no-translate="" hidden></div>
 				<div class="group"><h1>best nests so far</h1></div>
 				<div id="nestlist">
 					{{#each nests:i}}
@@ -1941,19 +2052,25 @@
 		<ul id="sidenav">
 		<li id="home_tab" class="active" data-page="home"></li>
 		<li id="config_tab" data-page="config"></li>
+        <li id="cm_results_tab" title="Resultados / Results" aria-label="Resultados / Results" aria-hidden="true" style="display:none"></li>
 		<!--<li id="account_tab" data-page="account"></li>-->
 		<li id="info_tab" data-page="info"></li>
 		</ul>
 		
 		<div id="home" class="page active">
 			
-			<div id="homecontent"></div>
+			<div id="cm-home-nest-status" hidden aria-live="polite">
+                <div class="cm-home-nest-heading"><span class="cm-home-nest-dot"></span><strong>Anidado en progreso</strong></div>
+                <div class="cm-home-nest-details">El optimizador continúa trabajando mientras navegas. Tiempo transcurrido: <span class="cm-home-nest-time">0:00</span></div>
+                <button id="cm-home-nest-open" type="button">Ver anidado</button>
+            </div>
+            <div id="homecontent"></div>
 			
 			<script id="template-part-list" type="text/ractive">
 				<ul class="topnav">
 					<li class="button import" id="import">Import</li>
 					<li class="button start {{ getSheets().length == 0 ? "disabled" : "" }}" id="startnest">Start nest</li>
-                    <li class="button" id="resume-last-nest" style="display:none">View last nest</li>
+
 				</ul>
 				
 				<div id="parts" class="parts-drag">
@@ -1987,6 +2104,7 @@
 					
 					<div id="partstools">
 						<a href="#" class="button addrectangle" id="addrectangle">&nbsp;</a>
+                        <button type="button" id="cm-collapse-tools" title="Contraer panel / Collapse panel" aria-label="Contraer panel / Collapse panel" data-no-translate="">&#x2304;</button>
 						<a href="#" class='button delete {{ getSelected().length == 0 ? "disabled" : "" }}' on-click="delete">&nbsp;</a>
 						<a href="#" class="button {{ parts.length == 0 ? "disabled" : "" }}" id="selectall" on-click="selectall">{{ getSelected().length == parts.length ? 'Deselect' : 'Select' }} all</a>
 						
@@ -1994,6 +2112,7 @@
 						<h2>Add Rectangle</h2>
 						<span class="row"><span class="label">width</span> <input type="number" min="0" id="rectanglewidth" required /> {{ getUnits }}</span>
 						<span class="row"><span class="label">height</span> <input type="number" min="0" id="rectangleheight" required /> {{ getUnits }}</span>
+                        <span class="row"><span class="label">Price (MXN)</span> <input type="number" min="0" step="0.01" id="cm-rectangle-price" placeholder="Opcional" /> </span>
 						
 						<a href="#" class="button add" id="confirmrectangle">Add</a>
 						<a href="#" class="button" id="cancelrectangle">Cancel</a>
@@ -2030,6 +2149,12 @@
 		
 		<div id="config" class="page">
 			<form id="configform">
+                <h1 data-cm-theme-es="Apariencia" data-cm-theme-en="Appearance">Apariencia</h1>
+                <dl class="formgroup"><dt data-cm-theme-es="Tema de la interfaz" data-cm-theme-en="Interface theme">Tema de la interfaz</dt><dd>
+                  <select id="cm-interface-theme" aria-label="Tema de la interfaz">
+                    <option value="dark">Oscuro</option><option value="light">Claro</option><option value="system">Sistema</option>
+                  </select>
+                </dd></dl>
                 <h1>Idioma / Language</h1>
                 <dl class="formgroup"><dt>Idioma de la interfaz / Interface language</dt><dd>
                   <select id="cm-interface-language" aria-label="Idioma de la interfaz">
@@ -2152,6 +2277,7 @@
 				</dl>
 				
                 <h1>Laser time estimation</h1>
+<p class="cm-laser-settings-note" data-cm-help-es="Para obtener una estimación más útil, utiliza las mismas velocidades y número de pasadas que configuras en tu software de corte (LightBurn, LaserGRBL, Rayforge, etc.). El tiempo real puede variar por aceleración y movimientos de la máquina." data-cm-help-en="For a more useful estimate, use the same speeds and number of passes as in your cutting software (LightBurn, LaserGRBL, Rayforge, etc.). Actual time may vary due to machine acceleration and travel movements.">For a more useful estimate, use the same speeds and number of passes as in your cutting software (LightBurn, LaserGRBL, Rayforge, etc.). Actual time may vary due to machine acceleration and travel movements.</p>
                 <dl class="formgroup">
                     <dt>Cut speed (mm/s)</dt><dd><input type="number" min="0.01" step="any" value="20" data-config="laserCutSpeed" required /> <i>mm/s</i></dd>
                     <dt>Travel speed (mm/s)</dt><dd><input type="number" min="0.01" step="any" value="100" data-config="laserTravelSpeed" required /> <i>mm/s</i></dd>
@@ -2177,7 +2303,14 @@
 				</div>
 			</form>
 			
-			<div class="config_explain" id="explain_units">
+			<div class="config_explain cm-help-panel" id="explain_optimizationMinutes"><svg class="cm-help-svg" viewBox="0 0 360 155" role="img" aria-label="Optimization progress"><rect x="16" y="31" width="328" height="88" rx="5" fill="none" stroke="#B5BCC9" stroke-width="2"/><line x1="32" y1="77" x2="328" y2="77" stroke="#B5BCC9" stroke-width="2"/><path class="cm-help-search" d="M32 99 H96 V80 H165 V66 H232 V46 H328" fill="none" stroke="#C6935E" stroke-width="3"/><circle class="cm-help-dot" cx="32" cy="99" r="5" fill="#C6935E"/><text x="20" y="142" fill="#B5BCC9" font-size="12">0</text><text x="330" y="142" fill="#B5BCC9" font-size="12" text-anchor="end">MAX</text></svg><h1 data-cm-help-es="Tiempo máximo de optimización" data-cm-help-en="Maximum optimization time">Maximum optimization time</h1><p data-cm-help-es="El optimizador busca mejores acomodos hasta alcanzar el tiempo máximo. Una búsqueda más larga puede mejorar el resultado, pero no lo garantiza." data-cm-help-en="The optimizer keeps searching for better placements until the selected maximum time is reached. A longer search may improve the result, but cannot guarantee it.">The optimizer keeps searching for better placements until the selected maximum time is reached. A longer search may improve the result, but cannot guarantee it.</p></div>
+<div class="config_explain cm-help-panel" id="explain_optimizationAutoStop"><svg class="cm-help-svg" viewBox="0 0 360 155" role="img"><rect x="18" y="22" width="324" height="108" rx="5" fill="none" stroke="#B5BCC9" stroke-width="2"/><path d="M35 105 H95 V85 H160 V65 H215" fill="none" stroke="#C6935E" stroke-width="3"/><circle class="cm-help-dot" cx="215" cy="65" r="12" fill="#C6935E"/><path d="M211 59 V71 M219 59 V71" stroke="#222" stroke-width="2"/><path d="M230 65 H321" stroke="#B5BCC9" stroke-width="3" stroke-dasharray="5 8"/></svg><h1 data-cm-help-es="Detener si no hay mejoras" data-cm-help-en="Stop if no improvements">Stop if no improvements</h1><p data-cm-help-es="Si se activa, la búsqueda puede finalizar antes cuando transcurre el tiempo establecido sin mejoras. Conserva el mejor acomodo encontrado." data-cm-help-en="When enabled, the search can finish early after the configured time without an improvement. It preserves the best placement found.">When enabled, the search can finish early after the configured time without an improvement. It preserves the best placement found.</p></div>
+<div class="config_explain cm-help-panel" id="explain_optimizationStallSeconds"><svg class="cm-help-svg" viewBox="0 0 360 155" role="img"><rect x="18" y="22" width="324" height="108" rx="5" fill="none" stroke="#B5BCC9" stroke-width="2"/><path d="M35 100 H100 V79 H170 V60 H320" fill="none" stroke="#C6935E" stroke-width="3"/><circle cx="251" cy="60" r="23" fill="#252525" stroke="#C6935E" stroke-width="2"/><path class="cm-help-search" d="M251 45 V60 L262 68" stroke="#C6935E" stroke-width="3" fill="none"/></svg><h1 data-cm-help-es="Tiempo sin mejoras" data-cm-help-en="Time without improvements">Time without improvements</h1><p data-cm-help-es="Si no se encuentra un acomodo mejor durante este intervalo, la optimización finaliza anticipadamente cuando la detención automática está activada." data-cm-help-en="If no better placement is found during this interval, optimization finishes early when automatic stopping is enabled.">If no better placement is found during this interval, optimization finishes early when automatic stopping is enabled.</p></div>
+<div class="config_explain cm-help-panel" id="explain_laserCutSpeed"><svg class="cm-help-svg" viewBox="0 0 360 155" role="img"><rect x="18" y="22" width="324" height="108" rx="5" fill="none" stroke="#B5BCC9" stroke-width="2"/><rect x="60" y="45" width="100" height="65" fill="none" stroke="#B5BCC9" stroke-width="2"/><path class="cm-help-laser" d="M60 45 H160 V110 H60 Z" fill="none" stroke="#C6935E" stroke-width="4" stroke-dasharray="12 9"/><path d="M220 77 H313 L301 68 M313 77 L301 86" fill="none" stroke="#C6935E" stroke-width="3"/><text x="222" y="61" fill="#B5BCC9" font-size="12">CUT</text></svg><h1 data-cm-help-es="Velocidad de corte (mm/s)" data-cm-help-en="Cut speed (mm/s)">Cut speed (mm/s)</h1><p data-cm-help-es="Velocidad estimada mientras el láser recorre los trazados de corte. Una velocidad mayor reduce el tiempo calculado; la velocidad real depende de la máquina y el material." data-cm-help-en="Estimated speed while the laser follows cutting paths. Higher speed reduces the estimated cutting time; actual speed depends on the machine and material.">Estimated speed while the laser follows cutting paths. Higher speed reduces the estimated cutting time; actual speed depends on the machine and material.</p></div>
+<div class="config_explain cm-help-panel" id="explain_laserTravelSpeed"><svg class="cm-help-svg" viewBox="0 0 360 155" role="img"><rect x="18" y="22" width="324" height="108" rx="5" fill="none" stroke="#B5BCC9" stroke-width="2"/><rect x="45" y="47" width="60" height="57" fill="none" stroke="#B5BCC9" stroke-width="2"/><circle cx="280" cy="76" r="28" fill="none" stroke="#B5BCC9" stroke-width="2"/><path class="cm-help-laser" d="M105 76 H250" fill="none" stroke="#C6935E" stroke-width="3" stroke-dasharray="7 12"/><path d="M239 68 L251 76 L239 84" fill="none" stroke="#C6935E" stroke-width="2"/><text x="137" y="61" fill="#B5BCC9" font-size="12">LASER OFF</text></svg><h1 data-cm-help-es="Velocidad de desplazamiento (mm/s)" data-cm-help-en="Travel speed (mm/s)">Travel speed (mm/s)</h1><p data-cm-help-es="Velocidad estimada de los movimientos entre trazados con el láser apagado. Estos recorridos suman tiempo, pero no cortan material." data-cm-help-en="Estimated speed of movements between paths with the laser off. These movements add time but do not cut material.">Estimated speed of movements between paths with the laser off. These movements add time but do not cut material.</p></div>
+<div class="config_explain cm-help-panel" id="explain_laserPasses"><svg class="cm-help-svg" viewBox="0 0 360 155" role="img"><rect x="18" y="22" width="324" height="108" rx="5" fill="none" stroke="#B5BCC9" stroke-width="2"/><rect x="90" y="44" width="165" height="65" fill="none" stroke="#B5BCC9" stroke-width="2"/><path class="cm-help-laser" d="M90 44 H255 V109 H90 Z" fill="none" stroke="#C6935E" stroke-width="3" stroke-dasharray="11 8"/><path d="M72 45 C35 70 42 116 78 116 L66 106 M78 116 L63 119" fill="none" stroke="#C6935E" stroke-width="3"/><text x="280" y="80" fill="#C6935E" font-size="22">×3</text></svg><h1 data-cm-help-es="Número de pasadas" data-cm-help-en="Number of passes">Number of passes</h1><p data-cm-help-es="Cantidad de veces que se repiten los trazados de corte. Más pasadas aumentan el tiempo estimado." data-cm-help-en="Number of repetitions of the cutting paths. More passes increase the estimated cutting time.">Number of repetitions of the cutting paths. More passes increase the estimated cutting time.</p></div>
+<div class="config_explain cm-help-panel" id="explain_laserSheetDelay"><svg class="cm-help-svg" viewBox="0 0 360 155" role="img" aria-label="Sheet handling"><rect x="55" y="18" width="250" height="120" fill="none" stroke="#B5BCC9" stroke-width="2"/><rect x="75" y="36" width="210" height="84" fill="none" stroke="#B5BCC9" stroke-width="2" stroke-dasharray="7 6"/><path class="cm-help-laser" d="M42 78 H80 M280 78 H318" fill="none" stroke="#C6935E" stroke-width="3"/><path d="M70 68 L80 78 L70 88 M290 68 L280 78 L290 88" fill="none" stroke="#C6935E" stroke-width="2"/></svg><h1 data-cm-help-es="Tiempo adicional por hoja (s)" data-cm-help-en="Extra time per sheet (s)">Extra time per sheet (s)</h1><p data-cm-help-es="Tiempo adicional de preparación y manipulación por cada hoja, como colocar y retirar el material." data-cm-help-en="Additional preparation and handling time added for each sheet, such as positioning and removing the material.">Additional preparation and handling time added for each sheet, such as positioning and removing the material.</p></div>
+<div class="config_explain" id="explain_units">
 			
 			<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
 	 width="551.291px" height="285px" viewBox="0 0 551.291 285" enable-background="new 0 0 551.291 285" xml:space="preserve">
@@ -3332,7 +3465,7 @@
 	</svg>
 			<h1 style="margin: 0 0 0.12em 0; font-size: 2.5em; color:#26A9E0; text-align: center">Deepnest</h1>
 			<div style="font-size: 1.05em; color:#B5BCC9; text-align:center; margin-bottom:0.55em">C&amp;M Designs Edition</div>
-			<div style="text-align:center">v1.0</div>
+			<div class="cm-about-version" style="text-align:center">v1.0.1 · Development</div>
 			
 		</div>
 	</div>
@@ -3341,7 +3474,7 @@
 /* C&M i18n v7.3.2: stable original keys, no writes to nesting settings. */
 (function () {
   'use strict';
-  const translations = {"Stop nest": "Detener anidado", "Start nest": "Iniciar anidado", "Export": "Exportar", "Import": "Importar", "Back": "Volver", "View last nest": "Ver último anidado", "SVG combined": "SVG combinado", "SVG per sheet (LightBurn)": "SVG por hoja (LightBurn)", "Sheets": "Hojas utilizadas", "Sheet": "Hoja", "sheet used": "Hojas utilizadas", "sheets used": "Hojas utilizadas", "parts placed": "piezas acomodadas", "laser time saved": "tiempo de láser ahorrado", "best nests so far": "mejores acomodos hasta ahora", "Auto sheets (batch production)": "Hojas automáticas (producción por lotes)", "Size": "Tamaño", "Sheet": "Hoja", "Quantity": "Cantidad", "Select all": "Seleccionar todo", "Deselect all": "Deseleccionar todo", "Add Rectangle": "Agregar rectángulo", "width": "ancho", "height": "alto", "Add": "Agregar", "Cancel": "Cancelar", "Nesting configuration": "Configuración de anidado", "Display units": "Unidades de visualización", "inches": "pulgadas", "Space between parts": "Separación entre piezas", "Curve tolerance": "Tolerancia de curvas", "Part rotations": "Rotaciones de piezas", "Optimization type": "Tipo de optimización", "Gravity": "Gravedad", "Bounding Box": "Caja delimitadora", "Squeeze": "Compactar", "Use rough approximation": "Usar aproximación simplificada", "CPU cores": "Núcleos de CPU", "Import/Export": "Importación y exportación", "SVG scale": "Escala SVG", "Endpoint tolerance": "Tolerancia de extremos", "DXF import units": "Unidades de importación DXF", "DXF export units": "Unidades de exportación DXF", "Laser options": "Opciones de láser", "Merge common lines": "Unir líneas compartidas", "Optimization ratio": "Relación de optimización", "Meta-heuristic fine tuning": "Ajustes del algoritmo genético", "GA population": "Tamaño de población", "GA mutation rate": "Tasa de mutación", "set all to default": "Restablecer valores predeterminados", "Points": "Puntos", "Picas": "Picas", "Inches": "Pulgadas", "General": "General", "About": "Acerca de", "seconds": "segundos", "second": "segundo", "minutes": "minutos", "minute": "minuto", "hours": "horas", "hour": "hora", "Select": "Seleccionar", "Deselect": "Deseleccionar", "all": "todo", "Optimizando distribución…": "Optimizando distribución…", "El color indica el tiempo transcurrido, no las piezas colocadas.": "El color indica el tiempo transcurrido, no las piezas colocadas.", "Idioma / Language": "Idioma / Language", "Idioma de la interfaz / Interface language": "Idioma de la interfaz / Interface language", "Units": "Unidades", "Whether to work in metric or imperial. This affects display only, and not import or export.": "Permite elegir entre unidades métricas e imperiales. Solo cambia la visualización; no afecta la importación ni la exportación.", "The minimum amount of space between each part. If you're planning on using the merge common lines feature, set this to zero.": "Distancia mínima entre las piezas. Si vas a unir líneas compartidas, establece este valor en cero.", "SVG import scale": "Escala de importación SVG", "This is the conversion factor between inches/mm to SVG units. Set to 72 units/inch for Illustrator and 90 units/inch for Inkscape.": "Factor de conversión entre pulgadas o milímetros y unidades SVG. Utiliza 72 unidades/pulgada para Illustrator y 90 unidades/pulgada para Inkscape.", "Normally the scaling factor can be extracted from the SVG file itself, but when not available this value is used.": "Normalmente se obtiene la escala del propio archivo SVG. Si no está disponible, se utiliza este valor.", "When computing a nest, curved sections must be turned into line segments. Curve tolerance is the maximum acceptable error when performing this approximation. Set to a higher value to speed up the nesting process, and a lower value when more precision is required.": "Para calcular el anidado, las curvas se aproximan mediante segmentos rectos. Esta tolerancia determina el error máximo permitido. Un valor mayor acelera el cálculo; uno menor mejora la precisión.", "Real-world vectors are often messy and imprecise, sometimes the points from one path to the next does not match up exactly to form a closed path. Try increasing this value if you have trouble importing a file.": "Los archivos vectoriales pueden contener pequeños desfases entre los extremos de los trazados, lo que impide cerrarlos correctamente. Si tienes problemas al importar un archivo, prueba aumentar esta tolerancia.", "Certain geometries can be very time consuming to compute, eg. several hundred unique snowflakes. You may wish to use a simple polygon approximation to speed up the process, at the cost of greater material use.": "Las geometrías complejas, como cientos de copos de nieve diferentes, pueden tardar mucho en calcularse. La aproximación con polígonos simples acelera el proceso, aunque puede aumentar el consumo de material.", "If your vector not unique (ie. several hundred identical snowflakes) using the \"quantity\" field is another way to speed up the process dramatically.": "Si necesitas muchas copias de una misma figura, utiliza el campo «Cantidad» en lugar de importar cada copia. Esto puede acelerar considerablemente el cálculo.", "Rotations": "Rotaciones", "The number of rotations to try when inserting a part. For example, if 8 rotations are used some parts will have a 45 degree angle. 4 rotations is generally enough, and ensures that common lines are easily merged for rectangular parts. Higher rotations may help if you have extremely irregular parts.": "Cantidad de orientaciones que se prueban al colocar cada pieza. Con 8 rotaciones se permiten incrementos de 45°. En general, 4 son suficientes y facilitan unir líneas compartidas en piezas rectangulares. Para formas muy irregulares pueden ayudar más rotaciones.", "1. Gravity": "1. Gravedad", "2. Bounding Box": "2. Caja delimitadora", "3. Squeeze": "3. Compactar", "Minimize the": "Minimiza el", "of the nest. It's good for when you have a rectangular sheet and wish to use the left overs for another cut.": "del anidado. Es útil con hojas rectangulares cuando quieres conservar el sobrante para otro corte.", "Reduce the overall": "Reduce el área total", "rectangular bounds": "del rectángulo delimitador", "area": "ocupada por las piezas", ". This mode is best for conserving material when only a small portion of the sheet is used.": ". Esta opción ayuda a ahorrar material cuando se utiliza solo una parte de la hoja.", ", but may produce nests that aren't rectangular. It is best used for irregularly shaped sheets, or when all sheets will be filled with no space left behind.": ", aunque el acomodo resultante puede no ser rectangular. Es útil para hojas irregulares o cuando se busca aprovecharlas por completo.", "CPU Cores": "Núcleos de CPU", "The number of concurrent nesting processes. 2 for most laptops and 4 for most desktops.": "Número de procesos de anidado que se ejecutan simultáneamente. Se recomiendan 2 para la mayoría de las laptops y 4 para equipos de escritorio, según su capacidad.", "If set, part edges that touch will be merged into a single line in the export. Merging common lines ensure that the laser only passes over each line a single time, reducing cut time and heat warping.": "Cuando se activa, los bordes coincidentes de las piezas se exportan como una sola línea. Así el láser recorre cada borde una sola vez, reduciendo el tiempo de corte y la deformación por calor.", "When placing each part, the program has to decide between whether saving time or material is more important. When the optimization ratio is 0, only material savings are considered. When the ratio is 1, time savings are considered as important as material savings.": "Al colocar las piezas, el programa equilibra el ahorro de material y el tiempo de corte. Con un valor de 0 se prioriza únicamente el material; con 1 se considera el ahorro de tiempo tan importante como el de material.", "Reduce the total area occupied by the parts, although the resulting arrangement may not be rectangular. It is useful for irregularly shaped sheets or when you want to make full use of the material.": "Reduce el área total ocupada por las piezas, aunque la distribución resultante puede no ser rectangular. Es útil para hojas irregulares o cuando se busca aprovechar todo el material", "Optimization control": "Control de optimización", "Maximum optimization time": "Tiempo máximo de optimización", "Stop if no improvements": "Detener si no hay mejoras", "Time without improvements": "Tiempo sin mejoras", "3 minutes — Quick": "3 minutos — Rápido", "5 minutes — Normal": "5 minutos — Normal", "10 minutes — Deep": "10 minutos — Profundo", "15 minutes — Intensive": "15 minutos — Intensivo", "No time limit": "Sin límite de tiempo", "30 seconds": "30 segundos", "60 seconds": "60 segundos", "2 minutes": "2 minutos", "3 minutes": "3 minutos", "5 minutes": "5 minutos", "Laser time estimation": "Estimación del tiempo de láser", "Cut speed (mm/s)": "Velocidad de corte (mm/s)", "Travel speed (mm/s)": "Velocidad de desplazamiento (mm/s)", "Number of passes": "Número de pasadas", "Extra time per sheet (s)": "Tiempo adicional por hoja (s)", "estimated total laser time (approx.)": "Tiempo total de corte estimado", "Genetic population size": "Tamaño de población", "Genetic algorithms are a form of machine learning that mimics biological evolution. A smaller population size may lead to results more quickly but will have less genetic diversity. A larger population size could give better results, at the cost of more processing time.": "El algoritmo genético prueba distintas soluciones inspirándose en la evolución biológica. Una población pequeña ofrece resultados más rápido, pero explora menos alternativas. Una población mayor puede mejorar el acomodo, a costa de más tiempo de cálculo.", "Genetic mutation rate": "Tasa de mutación", "How much to mutate the population in each successive trial. A higher mutation rate ensures that a large variety of nest arrangements are tried, but reduces the ability of the algorithm to build upon previous successes. Increase this value if there are obvious arrangements that it does not seem to explore.": "Controla cuánto cambian las soluciones entre generaciones. Una tasa mayor permite explorar más acomodos, pero dificulta aprovechar los resultados anteriores. Auméntala si el algoritmo parece ignorar alternativas evidentes."};
+  const translations = {"Price (MXN)": "Precio (MXN)", "Stop nest": "Detener anidado", "Start nest": "Iniciar anidado", "Export": "Exportar", "Import": "Importar", "Back": "Volver", "View last nest": "Ver último anidado", "SVG combined": "SVG combinado", "SVG per sheet (LightBurn)": "SVG por hoja (LightBurn)", "Sheets": "Hojas utilizadas", "Sheet": "Hoja", "sheet used": "Hojas utilizadas", "sheets used": "Hojas utilizadas", "parts placed": "piezas acomodadas", "laser time saved": "tiempo de láser ahorrado", "best nests so far": "mejores acomodos hasta ahora", "Auto sheets (batch production)": "Hojas automáticas (producción por lotes)", "Size": "Tamaño", "Sheet": "Hoja", "Quantity": "Cantidad", "Select all": "Seleccionar todo", "Deselect all": "Deseleccionar todo", "Add Rectangle": "Agregar rectángulo", "width": "ancho", "height": "alto", "Add": "Agregar", "Cancel": "Cancelar", "Nesting configuration": "Configuración de anidado", "Display units": "Unidades de visualización", "inches": "pulgadas", "Space between parts": "Separación entre piezas", "Curve tolerance": "Tolerancia de curvas", "Part rotations": "Rotaciones de piezas", "Optimization type": "Tipo de optimización", "Gravity": "Gravedad", "Bounding Box": "Caja delimitadora", "Squeeze": "Compactar", "Use rough approximation": "Usar aproximación simplificada", "CPU cores": "Núcleos de CPU", "Import/Export": "Importación y exportación", "SVG scale": "Escala SVG", "Endpoint tolerance": "Tolerancia de extremos", "DXF import units": "Unidades de importación DXF", "DXF export units": "Unidades de exportación DXF", "Laser options": "Opciones de láser", "Merge common lines": "Unir líneas compartidas", "Optimization ratio": "Relación de optimización", "Meta-heuristic fine tuning": "Ajustes del algoritmo genético", "GA population": "Tamaño de población", "GA mutation rate": "Tasa de mutación", "set all to default": "Restablecer valores predeterminados", "Points": "Puntos", "Picas": "Picas", "Inches": "Pulgadas", "General": "General", "About": "Acerca de", "seconds": "segundos", "second": "segundo", "minutes": "minutos", "minute": "minuto", "hours": "horas", "hour": "hora", "Select": "Seleccionar", "Deselect": "Deseleccionar", "all": "todo", "Optimizando distribución…": "Optimizando distribución…", "El color indica el tiempo transcurrido, no las piezas colocadas.": "El color indica el tiempo transcurrido, no las piezas colocadas.", "Idioma / Language": "Idioma / Language", "Idioma de la interfaz / Interface language": "Idioma de la interfaz / Interface language", "Units": "Unidades", "Whether to work in metric or imperial. This affects display only, and not import or export.": "Permite elegir entre unidades métricas e imperiales. Solo cambia la visualización; no afecta la importación ni la exportación.", "The minimum amount of space between each part. If you're planning on using the merge common lines feature, set this to zero.": "Distancia mínima entre las piezas. Si vas a unir líneas compartidas, establece este valor en cero.", "SVG import scale": "Escala de importación SVG", "This is the conversion factor between inches/mm to SVG units. Set to 72 units/inch for Illustrator and 90 units/inch for Inkscape.": "Factor de conversión entre pulgadas o milímetros y unidades SVG. Utiliza 72 unidades/pulgada para Illustrator y 90 unidades/pulgada para Inkscape.", "Normally the scaling factor can be extracted from the SVG file itself, but when not available this value is used.": "Normalmente se obtiene la escala del propio archivo SVG. Si no está disponible, se utiliza este valor.", "When computing a nest, curved sections must be turned into line segments. Curve tolerance is the maximum acceptable error when performing this approximation. Set to a higher value to speed up the nesting process, and a lower value when more precision is required.": "Para calcular el anidado, las curvas se aproximan mediante segmentos rectos. Esta tolerancia determina el error máximo permitido. Un valor mayor acelera el cálculo; uno menor mejora la precisión.", "Real-world vectors are often messy and imprecise, sometimes the points from one path to the next does not match up exactly to form a closed path. Try increasing this value if you have trouble importing a file.": "Los archivos vectoriales pueden contener pequeños desfases entre los extremos de los trazados, lo que impide cerrarlos correctamente. Si tienes problemas al importar un archivo, prueba aumentar esta tolerancia.", "Certain geometries can be very time consuming to compute, eg. several hundred unique snowflakes. You may wish to use a simple polygon approximation to speed up the process, at the cost of greater material use.": "Las geometrías complejas, como cientos de copos de nieve diferentes, pueden tardar mucho en calcularse. La aproximación con polígonos simples acelera el proceso, aunque puede aumentar el consumo de material.", "If your vector not unique (ie. several hundred identical snowflakes) using the \"quantity\" field is another way to speed up the process dramatically.": "Si necesitas muchas copias de una misma figura, utiliza el campo «Cantidad» en lugar de importar cada copia. Esto puede acelerar considerablemente el cálculo.", "Rotations": "Rotaciones", "The number of rotations to try when inserting a part. For example, if 8 rotations are used some parts will have a 45 degree angle. 4 rotations is generally enough, and ensures that common lines are easily merged for rectangular parts. Higher rotations may help if you have extremely irregular parts.": "Cantidad de orientaciones que se prueban al colocar cada pieza. Con 8 rotaciones se permiten incrementos de 45°. En general, 4 son suficientes y facilitan unir líneas compartidas en piezas rectangulares. Para formas muy irregulares pueden ayudar más rotaciones.", "1. Gravity": "1. Gravedad", "2. Bounding Box": "2. Caja delimitadora", "3. Squeeze": "3. Compactar", "Minimize the": "Minimiza el", "of the nest. It's good for when you have a rectangular sheet and wish to use the left overs for another cut.": "del anidado. Es útil con hojas rectangulares cuando quieres conservar el sobrante para otro corte.", "Reduce the overall": "Reduce el área total", "rectangular bounds": "del rectángulo delimitador", "area": "ocupada por las piezas", ". This mode is best for conserving material when only a small portion of the sheet is used.": ". Esta opción ayuda a ahorrar material cuando se utiliza solo una parte de la hoja.", ", but may produce nests that aren't rectangular. It is best used for irregularly shaped sheets, or when all sheets will be filled with no space left behind.": ", aunque el acomodo resultante puede no ser rectangular. Es útil para hojas irregulares o cuando se busca aprovecharlas por completo.", "CPU Cores": "Núcleos de CPU", "The number of concurrent nesting processes. 2 for most laptops and 4 for most desktops.": "Número de procesos de anidado que se ejecutan simultáneamente. Se recomiendan 2 para la mayoría de las laptops y 4 para equipos de escritorio, según su capacidad.", "If set, part edges that touch will be merged into a single line in the export. Merging common lines ensure that the laser only passes over each line a single time, reducing cut time and heat warping.": "Cuando se activa, los bordes coincidentes de las piezas se exportan como una sola línea. Así el láser recorre cada borde una sola vez, reduciendo el tiempo de corte y la deformación por calor.", "When placing each part, the program has to decide between whether saving time or material is more important. When the optimization ratio is 0, only material savings are considered. When the ratio is 1, time savings are considered as important as material savings.": "Al colocar las piezas, el programa equilibra el ahorro de material y el tiempo de corte. Con un valor de 0 se prioriza únicamente el material; con 1 se considera el ahorro de tiempo tan importante como el de material.", "Reduce the total area occupied by the parts, although the resulting arrangement may not be rectangular. It is useful for irregularly shaped sheets or when you want to make full use of the material.": "Reduce el área total ocupada por las piezas, aunque la distribución resultante puede no ser rectangular. Es útil para hojas irregulares o cuando se busca aprovechar todo el material", "Optimization control": "Control de optimización", "Maximum optimization time": "Tiempo máximo de optimización", "Stop if no improvements": "Detener si no hay mejoras", "Time without improvements": "Tiempo sin mejoras", "3 minutes — Quick": "3 minutos — Rápido", "5 minutes — Normal": "5 minutos — Normal", "10 minutes — Deep": "10 minutos — Profundo", "15 minutes — Intensive": "15 minutos — Intensivo", "No time limit": "Sin límite de tiempo", "30 seconds": "30 segundos", "60 seconds": "60 segundos", "2 minutes": "2 minutos", "3 minutes": "3 minutos", "5 minutes": "5 minutos", "Laser time estimation": "Estimación del tiempo de láser", "Cut speed (mm/s)": "Velocidad de corte (mm/s)", "Travel speed (mm/s)": "Velocidad de desplazamiento (mm/s)", "Number of passes": "Número de pasadas", "Extra time per sheet (s)": "Tiempo adicional por hoja (s)", "estimated total laser time (approx.)": "Tiempo total de corte estimado", "Genetic population size": "Tamaño de población", "Genetic algorithms are a form of machine learning that mimics biological evolution. A smaller population size may lead to results more quickly but will have less genetic diversity. A larger population size could give better results, at the cost of more processing time.": "El algoritmo genético prueba distintas soluciones inspirándose en la evolución biológica. Una población pequeña ofrece resultados más rápido, pero explora menos alternativas. Una población mayor puede mejorar el acomodo, a costa de más tiempo de cálculo.", "Genetic mutation rate": "Tasa de mutación", "How much to mutate the population in each successive trial. A higher mutation rate ensures that a large variety of nest arrangements are tried, but reduces the ability of the algorithm to build upon previous successes. Increase this value if there are obvious arrangements that it does not seem to explore.": "Controla cuánto cambian las soluciones entre generaciones. Una tasa mayor permite explorar más acomodos, pero dificulta aprovechar los resultados anteriores. Auméntala si el algoritmo parece ignorar alternativas evidentes."};
   const reverse = Object.create(null);
   Object.keys(translations).forEach(k => { if (!Object.prototype.hasOwnProperty.call(reverse, translations[k])) reverse[translations[k]] = k; });
   const sources = new WeakMap();
@@ -3439,5 +3572,31 @@
 })();
 </script>
 
-	</body>
+	<script src="cm-theme.js"></script>
+	<script src="cm-materials.js"></script>
+	<script src="cm-costs.js"></script>
+	<script src="cm-history.js"></script>
+
+<script>
+/* C&M: bilingual help illustrations and option labels; no optimizer changes */
+(function(){
+ var presets={
+  optimizationMinutes:[['3 minutes — Quick','3 minutos — Rápido'],['5 minutes — Normal','5 minutos — Normal'],['10 minutes — Deep','10 minutos — Profundo'],['15 minutes — Intensive','15 minutos — Intensivo'],['No time limit','Sin límite de tiempo']],
+  optimizationStallSeconds:[['30 seconds','30 segundos'],['60 seconds','60 segundos'],['2 minutes','2 minutos'],['3 minutes','3 minutos'],['5 minutes','5 minutos']]
+ };
+ function apply(){
+  var lang=document.getElementById('cm-interface-language');var es=!lang||lang.value!=='en';
+  Object.keys(presets).forEach(function(key){
+   var sel=document.querySelector('[data-config="'+key+'"]');if(!sel)return;
+   Array.prototype.forEach.call(sel.options,function(opt,i){if(presets[key][i])opt.textContent=presets[key][i][es?1:0];});
+  });
+  document.querySelectorAll('[data-cm-help-es]').forEach(function(el){el.textContent=el.getAttribute('data-cm-help-'+(es?'es':'en'));});
+ }
+ document.addEventListener('DOMContentLoaded',function(){apply();var select=document.getElementById('cm-interface-language');if(select)select.addEventListener('change',function(){apply();setTimeout(apply,30);});
+ // The existing i18n mutation observer may update the option text asynchronously.
+ var root=document.getElementById('configform');if(root){var scheduled=false;var observer=new MutationObserver(function(){if(scheduled)return;scheduled=true;requestAnimationFrame(function(){scheduled=false;apply();});});observer.observe(root,{subtree:true,childList:true,characterData:true});}
+ });
+})();
+</script>
+</body>
 </html>
