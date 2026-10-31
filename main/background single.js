@@ -91,7 +91,20 @@ window.db = {
 window.onload = function () {
 	const { ipcRenderer } = require('electron');
 	window.ipcRenderer = ipcRenderer;
-	window.addon = require('../build/Release/addon');
+	const fs = require('fs');
+        const path = require('path');
+
+        const packagedAddon = path.join(
+            process.resourcesPath, 'native', 'addon.node'
+        );
+
+        const developmentAddon = path.join(
+            __dirname, '..', 'build', 'Release', 'addon.node'
+        );
+
+        window.addon = require(
+            fs.existsSync(packagedAddon) ? packagedAddon : developmentAddon
+        );
 	
 	window.path = require('path')
 	window.url = require('url')

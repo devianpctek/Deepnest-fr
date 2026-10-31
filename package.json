@@ -1,6 +1,6 @@
 {
   "name": "Deepnest.io",
-  "version": "1.0.5",
+  "version": "1.0.0",
   "description": "Deep nesting for Laser and CNC",
   "main": "main.js",
   "scripts": {
@@ -52,6 +52,31 @@
     },
     "win": {
       "icon": "icon.ico"
-    }
+    },
+    "productName": "Deepnest-fr",
+    "asar": true,
+    "asarUnpack": [
+      "build/Release/*.node"
+    ],
+    "files": [
+      "**/*",
+      "!minkowski/Release/**",
+      "!**/*.bak",
+      "!**/*.bak-*",
+      "!package.json.bak-appimage"
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Graphics",
+      "executableName": "deepnest-fr"
+    },
+    "extraResources": [
+      {
+        "from": "build/Release/addon.node",
+        "to": "native/addon.node"
+      }
+    ]
   }
 }

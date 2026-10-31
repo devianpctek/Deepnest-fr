@@ -34,6 +34,7 @@
 		
 		require('./compat/electron-remote');
                 const { ipcRenderer } = require('electron');
+		const app = require('electron').remote;
 		const fs = require('graceful-fs');
 		const request = require('request');
 		const http = require('http');
@@ -86,7 +87,14 @@
 			  dxfImportScale: "1",
 			  dxfExportScale: "72",
 			  endpointTolerance: 0.36,
-			  conversionServer: 'http://convert.deepnest.io'
+			  optimizationMinutes: 5,
+              optimizationStallSeconds: 60,
+              optimizationAutoStop: true,
+              laserCutSpeed: 20,
+              laserTravelSpeed: 100,
+              laserPasses: 1,
+              laserSheetDelay: 0,
+              conversionServer: 'http://convert.deepnest.io'
 			};
 			
 			config.defaults(defaultconfig);
@@ -105,13 +113,24 @@
 				updateForm(val);
 			});
 			
-			var inputs = document.querySelectorAll('#config input, #config select');
+			var inputs = document.querySelectorAll('#config [data-config]');
 			
 			Array.from(inputs).forEach(i => {
 				i.addEventListener('change', function(e) {
 					
 					var val = i.value;
 					var key = i.getAttribute('data-config');
+                    if(['laserCutSpeed','laserTravelSpeed','laserPasses','laserSheetDelay'].includes(key)){
+                        var numeric = Number(val);
+                        if(!Number.isFinite(numeric) || (key === 'laserSheetDelay' ? numeric < 0 : numeric <= 0) || (key === 'laserPasses' && !Number.isInteger(numeric))){
+                            i.setCustomValidity('Introduce un valor válido');
+                            i.reportValidity();
+                            return;
+                        }
+                        i.setCustomValidity('');
+                        val = numeric;
+                    }
+
 					
 					if(key == 'scale'){					
 						if(config.getSync('units') == 'mm'){
@@ -119,7 +138,7 @@
 						}
 					}
 					
-					if(key == 'mergeLines' || key == 'simplify'){
+					if(key == 'mergeLines' || key == 'simplify' || key == 'optimizationAutoStop'){
 						val = i.checked;
 					}
 					
@@ -139,6 +158,7 @@
 					    config.get().then(val => {
 							window.DeepNest.config(val);
 							updateForm(val);
+                            if(window.nest && ['laserCutSpeed','laserTravelSpeed','laserPasses','laserSheetDelay'].includes(key)) window.nest.update('nests');
 							
 							i.parentNode.className = '';
 							
@@ -167,6 +187,12 @@
 			}
 			
 			function updateForm(c){
+				var languageSelect = document.getElementById('cm-interface-language');
+				if (languageSelect) {
+					if (typeof window.cmSyncLanguageSelector === 'function') {
+                        window.cmSyncLanguageSelector();
+                    }
+				}
 				var unitinput 
 				if(c.units == 'inch'){
 					unitinput = document.querySelector('#configform input[value=inch]');
@@ -196,7 +222,7 @@
 					si.value = c[si.getAttribute('data-config')]/scale.value;
 				});*/
 				
-				var inputs = document.querySelectorAll('#config input, #config select');
+				var inputs = document.querySelectorAll('#config [data-config]');
 				Array.from(inputs).forEach(i => {
 					var key = i.getAttribute('data-config');
 					if(key == 'units' || key == 'scale'){
@@ -205,7 +231,7 @@
 					else if(i.getAttribute('data-conversion') == 'true'){
 						i.value = c[i.getAttribute('data-config')]/scale.value;
 					}
-					else if(key == 'mergeLines' || key == 'simplify'){
+					else if(key == 'mergeLines' || key == 'simplify' || key == 'optimizationAutoStop'){
 						i.checked = c[i.getAttribute('data-config')];
 					}
 					else{
@@ -247,7 +273,7 @@
 			// version info
 			var pjson = require('../package.json');
 			var version = document.querySelector('#package-version');
-			version.innerText = pjson.version;
+			if (version) version.innerText = pjson.version;
 			
 			// part view
 			Ractive.DEBUG = false
@@ -384,6 +410,9 @@
 				if(DeepNest.imports.length > 0){
 					applyzoom();
 				}
+				// Eliminar un SVG no debe bloquear nuevas importaciones.
+				var importControl = document.querySelector('#import');
+				if(importControl) importControl.className = 'button import';
 			});
 			
 			// applies svg zoom library to the currently visible import
@@ -549,7 +578,6 @@
 			
 			// file import
 			var electron = require('electron');
-			var app = electron.remote; 
 			var fs = require('fs');
 			
 			var importbutton = document.querySelector('#import');
@@ -562,7 +590,9 @@
 				
 				setTimeout(function(){
 					var dialog = app.dialog;
-					dialog.showOpenDialog({ filters: [
+					dialog.showOpenDialog({ 
+					   properties: ['openFile', 'multiSelections'],
+ 					   filters: [
 				
 					   { name: 'CAD formats', extensions: ['svg', 'dxf', 'cdr'] }
 				
@@ -577,7 +607,7 @@
 							var filename = path.basename(fileName[0]);
 
 							if(ext.toLowerCase() == '.svg'){
-								readFile(fileName[0]);
+								fileName.filter(function(file){ return path.extname(file).toLowerCase() === '.svg'; }).forEach(readFile);
 								importbutton.className = 'button import';
 							}
 							else{
@@ -639,34 +669,78 @@
 				
 			};
 			
+			// Decode SVGs exported as UTF-8, UTF-16 LE or UTF-16 BE.
+			// Read bytes first: fs.readFile(..., 'utf-8') corrupts UTF-16 SVGs.
+			function decodeSvgBuffer(buffer){
+				if(!buffer || !buffer.length){
+					throw new Error('El archivo SVG está vacío');
+				}
+				var encoding = 'utf8';
+				var offset = 0;
+				if(buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE){
+					encoding = 'utf16le';
+					offset = 2;
+				}else if(buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF){
+					encoding = 'utf16be';
+					offset = 2;
+				}else if(buffer.length >= 3 && buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF){
+					offset = 3;
+				}else if(buffer.length >= 4 && buffer[0] === 0x3C && buffer[1] === 0x00 && buffer[2] === 0x3F && buffer[3] === 0x00){
+					encoding = 'utf16le';
+				}else if(buffer.length >= 4 && buffer[0] === 0x00 && buffer[1] === 0x3C && buffer[2] === 0x00 && buffer[3] === 0x3F){
+					encoding = 'utf16be';
+				}
+				var bytes = buffer.slice(offset);
+				if(encoding === 'utf16be'){
+					if(bytes.length % 2) throw new Error('SVG UTF-16 BE incompleto');
+					bytes = Buffer.from(bytes);
+					for(var i = 0; i < bytes.length; i += 2){
+						var tmp = bytes[i]; bytes[i] = bytes[i + 1]; bytes[i + 1] = tmp;
+					}
+					encoding = 'utf16le';
+				}
+				if(encoding === 'utf16le' && bytes.length % 2){
+					throw new Error('SVG UTF-16 LE incompleto');
+				}
+				return bytes.toString(encoding).replace(/^\uFEFF/, '');
+			}
+
 			function readFile(filepath){
-				fs.readFile(filepath, 'utf-8', function (err, data) {
-					  if(err){
-						  message("An error ocurred reading the file :" + err.message, true);
-						  return;
-					  }
-					  var filename = path.basename(filepath);
-					  var dirpath = path.dirname(filepath);
-					  
-					  importData(data, filename, dirpath, null);
+				fs.readFile(filepath, function (err, buffer) {
+					if(err){
+						message('Error al leer ' + path.basename(filepath) + ': ' + err.message, true);
+						importbutton.className = 'button import';
+						return;
+					}
+					try {
+						var data = decodeSvgBuffer(buffer);
+						importData(data, path.basename(filepath), path.dirname(filepath), null);
+					} catch (decodeError) {
+						console.error('[SVG DECODE ERROR] ' + filepath, decodeError);
+						message('No se pudo leer ' + path.basename(filepath) + ': ' + decodeError.message, true);
+							importbutton.className = 'button import';
+					}
 				});
 			};
 			
 			function importData(data, filename, dirpath, scalingFactor, dxfFlag){
-				window.DeepNest.importsvg(filename, dirpath, data, scalingFactor, dxfFlag);
-
-				DeepNest.imports.forEach(function(im){
-				im.selected = false;
-				});
-
-				DeepNest.imports[DeepNest.imports.length-1].selected = true;
-
-				ractive.update('imports');
-				ractive.update('parts');
-
-				attachSort();
-				applyzoom();
-				resize();
+				try {
+					window.DeepNest.importsvg(filename, dirpath, data, scalingFactor, dxfFlag);
+					DeepNest.imports.forEach(function(im){ im.selected = false; });
+					if(DeepNest.imports.length) DeepNest.imports[DeepNest.imports.length-1].selected = true;
+					ractive.update('imports');
+					ractive.update('parts');
+					attachSort();
+					applyzoom();
+					resize();
+					return true;
+				} catch (err) {
+					console.error('[IMPORT ERROR] ' + filename + ':', err);
+					message('No se pudo importar ' + filename + ': ' + err.message, true);
+					return false;
+				} finally {
+					importbutton.className = 'button import';
+				}
 			}
 			
 			// part list resize
@@ -709,7 +783,9 @@
 			// close message
 			var messageclose = document.querySelector('#message a.close');
 			messageclose.onclick = function(){
-				document.querySelector('#messagewrapper').className = '';
+				var wrapper = document.querySelector('#messagewrapper');
+				wrapper.className = '';
+				wrapper.style.display = 'none'; // Prevent invisible overlay from capturing clicks.
 				return false;
 			};
 			
@@ -813,6 +889,124 @@
 			  }
 			};
 			
+			// Automatic sheet supply: one virtual sheet per requested piece is a safe
+			// upper bound when every piece fits a sheet. The optimizer only displays
+			// sheets actually used. Keep manual sheet quantities unchanged.
+			function configureAutomaticSheets(){
+				var checkbox = document.getElementById('auto-sheets');
+				DeepNest.autoSheetCapacity = null;
+				if(!checkbox || !checkbox.checked) return true;
+				var sheets = DeepNest.parts.filter(function(p){ return p.sheet; });
+				var pieces = DeepNest.parts.filter(function(p){ return !p.sheet; });
+				if(!sheets.length || !pieces.length) return true;
+				if(sheets.length !== 1){
+					message('Automatic sheets requires exactly one material template marked Sheet.');
+					return false;
+				}
+				var total = 0;
+				for(var i=0; i<pieces.length; i++){
+					var q = Number(pieces[i].quantity);
+					if(!Number.isSafeInteger(q) || q < 1){ message('Enter valid whole-number quantities.'); return false; }
+					total += q;
+					if(total > 250){ message('Automatic mode currently supports up to 250 pieces per run.'); return false; }
+					var b = pieces[i].bounds, sheet = sheets[0].bounds;
+					if(b && sheet && !((b.width <= sheet.width && b.height <= sheet.height) || (b.height <= sheet.width && b.width <= sheet.height))){
+						message('At least one piece is larger than the material sheet.'); return false;
+					}
+				}
+				DeepNest.autoSheetCapacity = total;
+				return true;
+			}
+
+			// v7 production limits. Optimization remains manually stoppable.
+			var productionWatchdog = null;
+			var productionStarted = 0;
+			var productionLastImprovement = 0;
+			var productionBestSheets = Infinity;
+			var productionBestPlaced = -1;
+			var productionTarget = 0;
+			var productionStopReason = '';
+            var productionWaitingNotice = false;
+			function updateBrandProgress(){
+                var overlay = document.querySelector('#cm-nest-progress');
+                if(!overlay) return;
+                var elapsed = Math.max(0, Date.now() - productionStarted);
+                var maxMinutes = Number(config.getSync('optimizationMinutes') || 0);
+                var percent = maxMinutes > 0 ? Math.min(DeepNest.nests.some(function(n){return countNestPieces(n)>0;}) ? 100 : 99, Math.round(elapsed / (maxMinutes*60*1000) * 100)) : 0;
+                var fill = overlay.querySelector('.cm-brand-color');
+                var label = overlay.querySelector('.cm-brand-percent');
+                if(fill) fill.style.clipPath = 'inset(' + (100-percent) + '% 0 0 0)';
+                if(label) label.textContent = (maxMinutes > 0 ? percent + '% · ' : '') + Math.floor(elapsed/60000) + ':' + String(Math.floor(elapsed/1000)%60).padStart(2,'0') + ' / ' + (maxMinutes > 0 ? maxMinutes + ':00' : '∞');
+            }
+            function showBrandProgress(){
+                var overlay = document.querySelector('#cm-nest-progress');
+                if(overlay) overlay.classList.add('visible');
+                updateBrandProgress();
+            }
+            function hideBrandProgress(){
+                var overlay = document.querySelector('#cm-nest-progress');
+                if(overlay) overlay.classList.remove('visible');
+            }
+            function clearProductionWatchdog(){
+				if(productionWatchdog !== null){ clearInterval(productionWatchdog); productionWatchdog = null; }
+			}
+			function countNestPieces(n){
+				if(!n || !Array.isArray(n.placements)) return 0;
+				return n.placements.reduce(function(total, sheet){
+					return total + (Array.isArray(sheet.sheetplacements) ? sheet.sheetplacements.length : 0);
+				}, 0);
+			}
+			function startProductionWatchdog(){
+				clearProductionWatchdog();
+				productionTarget = DeepNest.parts.filter(function(p){return !p.sheet;}).reduce(function(n,p){return n + Number(p.quantity || 0);},0);
+				productionStarted = Date.now();
+                showBrandProgress();
+				productionLastImprovement = productionStarted;
+				productionBestSheets = Infinity;
+				productionBestPlaced = -1;
+				productionStopReason = '';
+                productionWaitingNotice = false;
+				productionWatchdog = setInterval(function(){
+					if(!DeepNest.working){clearProductionWatchdog();return;}
+					var now = Date.now();
+                    updateBrandProgress();
+					DeepNest.nests.forEach(function(n){
+						var placed = countNestPieces(n), sheets = n.placements.length;
+						if(placed > productionBestPlaced || (placed === productionBestPlaced && sheets < productionBestSheets)){
+							productionBestPlaced = placed;
+							productionBestSheets = sheets;
+							productionLastImprovement = now;
+						}
+					});
+					var maxMinutes = Number(config.getSync('optimizationMinutes'));
+                    var stallSeconds = Number(config.getSync('optimizationStallSeconds'));
+                    var autoStop = config.getSync('optimizationAutoStop') !== false;
+                    if(maxMinutes > 0 && now-productionStarted >= maxMinutes*60*1000){
+                        productionStopReason = 'Límite de optimización alcanzado: ' + maxMinutes + ' minutos.';
+                    }else if(autoStop && stallSeconds > 0 && productionTarget > 0 && productionBestPlaced >= productionTarget && now-productionLastImprovement >= stallSeconds*1000){
+                        productionStopReason = 'Sin mejoras durante ' + stallSeconds + ' segundos con todas las piezas colocadas.';
+					}else return;
+                    // Never stop automatically before a usable nesting result exists.
+                    // The first generation may take longer than the configured limit
+                    // for complex SVGs; stopping here would leave an empty preview.
+                    var hasValidResult = DeepNest.nests.some(function(n){
+                        return n && Array.isArray(n.placements) && n.placements.length > 0 && countNestPieces(n) > 0;
+                    });
+                    if(!hasValidResult){
+                        if(!productionWaitingNotice){
+                            console.warn('[C&M Edition] Tiempo configurado alcanzado, pero aún no existe un acomodo válido. Se esperará al primer resultado; puedes detener manualmente.');
+                            productionWaitingNotice = true;
+                        }
+                        return;
+                    }
+					clearProductionWatchdog();
+					var stopButton = document.querySelector('#stopnest');
+					if(stopButton && stopButton.className === 'button stop') stopButton.click();
+					else { ipcRenderer.send('background-stop'); DeepNest.stop(); }
+					console.info('[Deepnest v7]',productionStopReason, 'Mejor resultado:', productionBestPlaced + '/' + productionTarget, 'piezas en', productionBestSheets, 'hojas');
+				}, 2000);
+			}
+
 			var startnest = function(){
 				/*function toClipperCoordinates(polygon){
 					var clone = [];
@@ -887,6 +1081,7 @@
 				
 				for(var i=0; i<DeepNest.parts.length; i++){
 					if(DeepNest.parts[i].sheet){
+						if(!configureAutomaticSheets()) return;
 						// need at least one sheet
 						document.querySelector('#main').className = '';
 						document.querySelector('#nest').className = 'active';
@@ -903,6 +1098,7 @@
 									n.selected = false;
 								});
 								displayNest(this.DeepNest.nests[0]);
+                                hideBrandProgress();
 								this.DeepNest.nests[0].selected = true;
 							}
 							
@@ -916,6 +1112,7 @@
 						deleteCache();
 						
 						DeepNest.start(null, displayCallback.bind(window));
+						startProductionWatchdog();
 						return;
 					}
 				}
@@ -933,6 +1130,8 @@
 			var stop = document.querySelector('#stopnest');
 			stop.onclick = function(e){
 				if(stop.className == 'button stop'){
+					clearProductionWatchdog();
+                    hideBrandProgress();
 					ipcRenderer.send('background-stop');
 					DeepNest.stop();
 					document.querySelectorAll('li.progress').forEach(function(p){
@@ -955,36 +1154,51 @@
 				}
 			}
 			
-			var back = document.querySelector('#back');
-			back.onclick = function(e){
-						
-				setTimeout(function(){
-					if(DeepNest.working){
-						ipcRenderer.send('background-stop');
-						DeepNest.stop();
-						document.querySelectorAll('li.progress').forEach(function(p){
-							p.removeAttribute('id');
-							p.className = 'progress';
-						});
-					}
-					DeepNest.reset();
-					deleteCache();
-					
-					window.nest.update('nests');
-					document.querySelector('#nestdisplay').innerHTML = '';
-					stop.className = 'button stop';
-					stop.innerHTML = 'Stop nest';
-					
-					// disable export button
-					document.querySelector('#export_wrapper').className = '';
-					document.querySelector('#export').className = 'button export disabled';
-					
-				}, 2000);
-				
-				document.querySelector('#main').className = 'active';
-				document.querySelector('#nest').className = '';
-			}
-			
+            // Keep the last valid nesting result when navigating back to the editor.
+            function lastValidNest(){
+                return DeepNest.nests.find(function(n){
+                    return n && Array.isArray(n.placements) && n.placements.length > 0;
+                });
+            }
+            function updateResumeButton(){
+                var button = document.querySelector('#resume-last-nest');
+                if(button) button.style.display = lastValidNest() ? '' : 'none';
+            }
+            document.querySelector('#homecontent').addEventListener('click', function(event){
+                var button = event.target.closest('#resume-last-nest');
+                if(!button) return;
+                var last = DeepNest.nests.find(function(n){return n.selected && n.placements && n.placements.length;}) || lastValidNest();
+                if(!last) return;
+                document.querySelector('#main').className = '';
+                document.querySelector('#nest').className = 'active';
+                displayNest(last);
+                window.nest.update('nests');
+                document.querySelector('#export_wrapper').className = 'active';
+                document.querySelector('#export').className = 'button export';
+                resize();
+            });
+            var back = document.querySelector('#back');
+            back.onclick = function(e){
+                clearProductionWatchdog();
+                hideBrandProgress();
+                if(DeepNest.working){
+                    ipcRenderer.send('background-stop');
+                    DeepNest.stop();
+                    document.querySelectorAll('li.progress').forEach(function(p){
+                        p.removeAttribute('id');
+                        p.className = 'progress';
+                    });
+                }
+                // Do not call DeepNest.reset(), deleteCache(), or clear #nestdisplay here.
+                // Those actions would discard the best result and prevent returning to it.
+                stop.className = 'button start';
+                stop.innerHTML = 'Start nest';
+                document.querySelector('#main').className = 'active';
+                document.querySelector('#nest').className = '';
+                updateResumeButton();
+                resize();
+            };
+
 			var exportbutton = document.querySelector('#export');
 			
 			var exportsvg = document.querySelector('#exportsvg');
@@ -1013,6 +1227,43 @@
 				});
 			};
 			
+			// v7.1: export each physical sheet as a separate, correctly sized SVG.
+			var exportsheets = document.querySelector('#exportsheets');
+			exportsheets.onclick = function(){
+				var selected = DeepNest.nests.filter(function(n){ return n.selected; });
+				if(!selected.length || !selected[selected.length - 1].placements.length){
+					message('No hay un nesting para exportar.', true);
+					return;
+				}
+				var nest = selected[selected.length - 1];
+				app.dialog.showOpenDialog({
+					title: 'Seleccionar carpeta para exportar las hojas SVG',
+					properties: ['openDirectory', 'createDirectory']
+				}).then(function(result){
+					if(result.canceled || !result.filePaths || !result.filePaths.length) return;
+					var parent = result.filePaths[0];
+					var stamp = new Date().toISOString().replace(/[:.]/g, '-');
+					var folder = path.join(parent, 'Deepnest_hojas_' + stamp);
+					fs.mkdirSync(folder);
+					var pad = String(nest.placements.length).length;
+					var lines = ['Hoja,Ancho (mm),Alto (mm),Piezas'];
+					nest.placements.forEach(function(sheet, i){
+						var filename = 'Hoja_' + String(i + 1).padStart(Math.max(2, pad), '0') + '.svg';
+						var singleNest = {placements: [sheet], mergedLength: nest.mergedLength || 0};
+						fs.writeFileSync(path.join(folder, filename), exportNest(singleNest, false, true), 'utf8');
+						var b = DeepNest.parts[sheet.sheet].bounds;
+						var sc = config.getSync('scale');
+						var factor = config.getSync('units') === 'mm' ? 25.4 : 1;
+						lines.push([filename, (b.width * factor / sc).toFixed(2), (b.height * factor / sc).toFixed(2), sheet.sheetplacements.length].join(','));
+					});
+					fs.writeFileSync(path.join(folder, 'Resumen_hojas.csv'), lines.join('\n') + '\n', 'utf8');
+					message('Exportadas ' + nest.placements.length + ' hojas SVG en: ' + folder);
+				}).catch(function(err){
+					console.error('[Exportar hojas]', err);
+					message('Error al exportar hojas: ' + err.message, true);
+				});
+			};
+
 			var exportdxf = document.querySelector('#exportdxf');
 			exportdxf.onclick = function(){
 				var dialog = app.dialog;
@@ -1112,7 +1363,7 @@
 			};*/
 			
 			// nest save
-			var exportNest = function(n, dxf){
+			var exportNest = function(n, dxf, individualSheet){
 			
 				var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 				
@@ -1161,7 +1412,7 @@
 					});
 					
 					// put next sheet below
-					svgheight += 1.1*sheetbounds.height;
+					svgheight += (individualSheet ? 1 : 1.1)*sheetbounds.height;
 				});
 				
 				var scale = config.getSync('scale');
@@ -1221,6 +1472,8 @@
 					p.setAttribute('class', 'sheet');
 				});
 				
+                document.querySelectorAll('#nestsvg .cm-sheet-boundary').forEach(function(el){ el.remove(); });
+
 				// remove laser markers
 				document.querySelectorAll('#nestsvg .merged').forEach(function(p){
 					p.remove();
@@ -1258,7 +1511,21 @@
 						svgwidth = sheetbounds.width;
 					}
 					
-					s.sheetplacements.forEach(function(p){
+	                    // Visual-only sheet boundary: not part of exported cutting paths.
+                    var boundary = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    boundary.setAttribute('class', 'cm-sheet-boundary');
+                    boundary.setAttribute('x', '0');
+                    boundary.setAttribute('y', String(svgheight));
+                    boundary.setAttribute('width', String(sheetbounds.width));
+                    boundary.setAttribute('height', String(sheetbounds.height));
+                    boundary.setAttribute('fill', 'none');
+                    boundary.setAttribute('stroke', '#40c6e8');
+                    boundary.setAttribute('stroke-width', String(Math.max(0.6, sheetbounds.width / 700)));
+                    boundary.setAttribute('vector-effect', 'non-scaling-stroke');
+                    boundary.setAttribute('pointer-events', 'none');
+                    svg.insertBefore(boundary, svg.firstChild);
+
+				s.sheetplacements.forEach(function(p){
 						var partelement = document.querySelector('#part'+p.id);
 						if(!partelement){
 							var part = DeepNest.parts[p.source];
@@ -1396,6 +1663,57 @@
 						
 						return num + '/' + total;
 					},
+                    getLaserEstimate: function(){
+                        var selected = this.get('nests').filter(function(n){ return n.selected; }).pop();
+                        if(!selected || !selected.placements || !selected.placements.length) return '—';
+                        var cutSpeed = Number(config.getSync('laserCutSpeed'));
+                        var travelSpeed = Number(config.getSync('laserTravelSpeed'));
+                        var passes = Number(config.getSync('laserPasses'));
+                        var extra = Number(config.getSync('laserSheetDelay'));
+                        if(!(cutSpeed > 0 && travelSpeed > 0 && passes >= 1 && Number.isInteger(passes) && extra >= 0)) return '—';
+                        // Geometry is measured in internal SVG units; convert to mm.
+                        var scale = Number(config.getSync('scale'));
+                        if(!(scale > 0)) return '—';
+                        var mmPerUnit = 25.4 / scale;
+                        var lengths = {};
+                        function geometryLength(source){
+                            if(Object.prototype.hasOwnProperty.call(lengths, source)) return lengths[source];
+                            var part = DeepNest.parts[source];
+                            if(!part || !part.svgelements) return 0;
+                            var total = 0;
+                            part.svgelements.forEach(function(e){
+                                try {
+                                    var tag = (e.tagName || '').toLowerCase();
+                                    if(typeof e.getTotalLength === 'function') total += e.getTotalLength();
+                                    else if(tag === 'line') total += Math.hypot(Number(e.getAttribute('x2'))-Number(e.getAttribute('x1')), Number(e.getAttribute('y2'))-Number(e.getAttribute('y1')));
+                                    else if(tag === 'rect') total += 2*(Number(e.getAttribute('width'))+Number(e.getAttribute('height')));
+                                    else if(tag === 'circle') total += 2*Math.PI*Number(e.getAttribute('r'));
+                                    else if(tag === 'ellipse') { var a=Number(e.getAttribute('rx')),b=Number(e.getAttribute('ry')); total += Math.PI*(3*(a+b)-Math.sqrt((3*a+b)*(a+3*b))); }
+                                } catch(err) { /* unsupported SVG element: skip */ }
+                            });
+                            lengths[source] = total;
+                            return total;
+                        }
+                        var cutUnits = 0, travelUnits = 0;
+                        selected.placements.forEach(function(sheet){
+                            var prev = null;
+                            sheet.sheetplacements.forEach(function(p){
+                                cutUnits += geometryLength(p.source);
+                                // Approximate rapid travel using consecutive part origins.
+                                // Does not simulate exact LightBurn ordering or accelerations.
+                                if(prev) travelUnits += Math.hypot(p.x-prev.x, p.y-prev.y);
+                                prev = p;
+                            });
+                        });
+                        if(!(cutUnits > 0)) return '—';
+                        // Shared cuts are counted once when the optimizer reports their length.
+                        var merged = Number(selected.mergedLength) || 0;
+                        cutUnits = Math.max(0, cutUnits - Math.max(0, merged));
+                        var seconds = (cutUnits*mmPerUnit/cutSpeed + travelUnits*mmPerUnit/travelSpeed)*passes + selected.placements.length*extra;
+                        if(!Number.isFinite(seconds)) return '—';
+                        var rounded = Math.round(seconds);
+                        return Math.floor(rounded/3600) + ':' + String(Math.floor(rounded%3600/60)).padStart(2,'0') + ':' + String(rounded%60).padStart(2,'0');
+                    },
 					getTimeSaved: function(){
 						var ne = this.get('nests');
 						var selected = ne.filter(function(n){
@@ -1473,7 +1791,9 @@
 			else{
 				message.className = '';
 			}
-			document.querySelector('#messagewrapper').className = 'active';
+			var wrapper = document.querySelector('#messagewrapper');
+			wrapper.style.display = 'block';
+			wrapper.className = 'active';
 			setTimeout(function(){
 				message.className += ' animated bounce';
 			}, 100);
@@ -1553,7 +1873,8 @@
 			<span id="export_wrapper">
 			<li class="button export disabled" id="export">Export</li>
 			<ul class="dropdown">
-				<li id="exportsvg">SVG file</li>
+				<li id="exportsvg">SVG combinado</li>
+				<li id="exportsheets">SVG por hoja (LightBurn)</li>
 				<li id="exportdxf">DXF file</li>
 				<!--<li id="exportgcode">GCode file</li>-->
 			</ul>
@@ -1577,12 +1898,22 @@
 		
 		<div id="nestcontent"></div>
 		<div id="nestdisplay"></div>
+        <div id="cm-nest-progress" aria-live="off">
+          <div class="cm-brand-art">
+            <img class="cm-brand-gray" src="img/cm-designs-logo.png" alt="C&amp;M Designs" />
+            <img class="cm-brand-color" src="img/cm-designs-logo.png" alt="" />
+          </div>
+          <div class="cm-brand-caption">Optimizando distribución…</div>
+          <div class="cm-brand-percent">0% · 0:00 / 5:00</div>
+          <div class="cm-brand-hint">El color indica el tiempo transcurrido, no las piezas colocadas.</div>
+        </div>
 		
 		<script id="nest-template" type="text/ractive">
 			<div id="nestinfo" class='{{ nests.length > 0 ? "active" : "" }}'>
 				<div class="group"><h1>{{ getSelected().length > 0 ? getSelected()[0].placements.length : '-' }}</h1><span class="label">{{ getSelected().length > 0 ? (getSelected()[0].placements.length > 1 ? 'sheets used' : 'sheet used') : '' }}</span></div>
 				<div class="group"><h1>{{ getPartsPlaced() }}</h1><span class="label">parts placed</span></div>
 				<div class="group"><h1>{{ getTimeSaved() }}</h1><span class="label">laser time saved</span></div>
+                <div class="group"><h1>{{ getLaserEstimate() }}</h1><span class="label">estimated total laser time (approx.)</span></div>
 				<div class="group"><h1>best nests so far</h1></div>
 				<div id="nestlist">
 					{{#each nests:i}}
@@ -1599,7 +1930,7 @@
 		</script>
 	</div>
 	
-	<div id="messagewrapper">
+	<div id="messagewrapper" style="display: none;">
 		<div id="message">
 		<a href="#" class="button close"></a>
 		<div id="messagecontent"></div>
@@ -1622,9 +1953,14 @@
 				<ul class="topnav">
 					<li class="button import" id="import">Import</li>
 					<li class="button start {{ getSheets().length == 0 ? "disabled" : "" }}" id="startnest">Start nest</li>
+                    <li class="button" id="resume-last-nest" style="display:none">View last nest</li>
 				</ul>
 				
 				<div id="parts" class="parts-drag">
+					<div id="auto-sheets-bar">
+						<label style="cursor: pointer;"><input type="checkbox" id="auto-sheets" checked /> Auto sheets (batch production)</label>
+						<span title="Select exactly one Sheet template. The optimizer uses only the sheets needed; processing large batches can take longer." style="margin-left: 6px;">ⓘ</span>
+					</div>
 					
 					<div id="partscroll">
 						<table>
@@ -1694,6 +2030,13 @@
 		
 		<div id="config" class="page">
 			<form id="configform">
+                <h1>Idioma / Language</h1>
+                <dl class="formgroup"><dt>Idioma de la interfaz / Interface language</dt><dd>
+                  <select id="cm-interface-language" aria-label="Idioma de la interfaz">
+                    <option value="es">Español (México)</option>
+                    <option value="en">English</option>
+                  </select>
+                </dd></dl>
 				<h1>Nesting configuration</h1>
 				
 				<dl class="formgroup">
@@ -1738,11 +2081,33 @@
 					</dd>
 				</dl>
 				
+                <h1>Optimization control</h1>
+                <dl class="formgroup">
+                    <dt>Maximum optimization time</dt>
+                    <dd><select data-config="optimizationMinutes">
+                        <option value="3">3 minutes — Quick</option>
+                        <option value="5">5 minutes — Normal</option>
+                        <option value="10">10 minutes — Deep</option>
+                        <option value="15">15 minutes — Intensive</option>
+                        <option value="0">No time limit</option>
+                    </select></dd>
+                    <dt>Stop if no improvements</dt>
+                    <dd><input type="checkbox" data-config="optimizationAutoStop" /></dd>
+                    <dt>Time without improvements</dt>
+                    <dd><select data-config="optimizationStallSeconds">
+                        <option value="30">30 seconds</option>
+                        <option value="60">60 seconds</option>
+                        <option value="120">2 minutes</option>
+                        <option value="180">3 minutes</option>
+                        <option value="300">5 minutes</option>
+                    </select></dd>
+                </dl>
+
 				<h1>Import/Export</h1>
 				<dl class="formgroup">
 					<dt>SVG scale</dt>
 					<dd>
-						<input id="inputscale" type="number" value="72" min="1" step="any" data-config="scale" required /> <i>units/<span class="unit-label">inch</span></i>
+						<span class="cm-scale-field"><input id="inputscale" type="number" value="72" min="1" step="any" data-config="scale" required /><i>units/<span class="unit-label">inch</span></i></span>
 					</dd>
 					
 					<dt>Endpoint tolerance</dt>
@@ -1786,6 +2151,14 @@
 					</dd>
 				</dl>
 				
+                <h1>Laser time estimation</h1>
+                <dl class="formgroup">
+                    <dt>Cut speed (mm/s)</dt><dd><input type="number" min="0.01" step="any" value="20" data-config="laserCutSpeed" required /> <i>mm/s</i></dd>
+                    <dt>Travel speed (mm/s)</dt><dd><input type="number" min="0.01" step="any" value="100" data-config="laserTravelSpeed" required /> <i>mm/s</i></dd>
+                    <dt>Number of passes</dt><dd><input type="number" min="1" step="1" value="1" data-config="laserPasses" required /></dd>
+                    <dt>Extra time per sheet (s)</dt><dd><input type="number" min="0" step="any" value="0" data-config="laserSheetDelay" required /> <i>s</i></dd>
+                </dl>
+
 				<h1>Meta-heuristic fine tuning</h1>
 				<dl class="formgroup">
 					<dt>GA population</dt>
@@ -2315,7 +2688,7 @@
 				
 
 				<h2>3. Squeeze</h2>
-				Reduce the overall <em>area</em>, but may produce nests that aren't rectangular. It is best used for irregularly shaped sheets, or when all sheets will be filled with no space left behind.
+				Reduce the total area occupied by the parts, although the resulting arrangement may not be rectangular. It is useful for irregularly shaped sheets or when you want to make full use of the material.
 			</div>
 			
 			<div class="config_explain" id="explain_threads">
@@ -2957,11 +3330,114 @@
 		<circle fill="none" stroke="#26A7DF" stroke-width="2.5" stroke-miterlimit="10" cx="183.807" cy="141.338" r="25.866"/>
 	</g>
 	</svg>
-			<h1 style="margin: 0 0 0.2em 0; font-size: 3em; color:#26A9E0; text-align: center">Deepnest</h1>
-			
-			v<span id="package-version"></span>
+			<h1 style="margin: 0 0 0.12em 0; font-size: 2.5em; color:#26A9E0; text-align: center">Deepnest</h1>
+			<div style="font-size: 1.05em; color:#B5BCC9; text-align:center; margin-bottom:0.55em">C&amp;M Designs Edition</div>
+			<div style="text-align:center">v1.0</div>
 			
 		</div>
 	</div>
+
+<script>
+/* C&M i18n v7.3.2: stable original keys, no writes to nesting settings. */
+(function () {
+  'use strict';
+  const translations = {"Stop nest": "Detener anidado", "Start nest": "Iniciar anidado", "Export": "Exportar", "Import": "Importar", "Back": "Volver", "View last nest": "Ver último anidado", "SVG combined": "SVG combinado", "SVG per sheet (LightBurn)": "SVG por hoja (LightBurn)", "Sheets": "Hojas utilizadas", "Sheet": "Hoja", "sheet used": "Hojas utilizadas", "sheets used": "Hojas utilizadas", "parts placed": "piezas acomodadas", "laser time saved": "tiempo de láser ahorrado", "best nests so far": "mejores acomodos hasta ahora", "Auto sheets (batch production)": "Hojas automáticas (producción por lotes)", "Size": "Tamaño", "Sheet": "Hoja", "Quantity": "Cantidad", "Select all": "Seleccionar todo", "Deselect all": "Deseleccionar todo", "Add Rectangle": "Agregar rectángulo", "width": "ancho", "height": "alto", "Add": "Agregar", "Cancel": "Cancelar", "Nesting configuration": "Configuración de anidado", "Display units": "Unidades de visualización", "inches": "pulgadas", "Space between parts": "Separación entre piezas", "Curve tolerance": "Tolerancia de curvas", "Part rotations": "Rotaciones de piezas", "Optimization type": "Tipo de optimización", "Gravity": "Gravedad", "Bounding Box": "Caja delimitadora", "Squeeze": "Compactar", "Use rough approximation": "Usar aproximación simplificada", "CPU cores": "Núcleos de CPU", "Import/Export": "Importación y exportación", "SVG scale": "Escala SVG", "Endpoint tolerance": "Tolerancia de extremos", "DXF import units": "Unidades de importación DXF", "DXF export units": "Unidades de exportación DXF", "Laser options": "Opciones de láser", "Merge common lines": "Unir líneas compartidas", "Optimization ratio": "Relación de optimización", "Meta-heuristic fine tuning": "Ajustes del algoritmo genético", "GA population": "Tamaño de población", "GA mutation rate": "Tasa de mutación", "set all to default": "Restablecer valores predeterminados", "Points": "Puntos", "Picas": "Picas", "Inches": "Pulgadas", "General": "General", "About": "Acerca de", "seconds": "segundos", "second": "segundo", "minutes": "minutos", "minute": "minuto", "hours": "horas", "hour": "hora", "Select": "Seleccionar", "Deselect": "Deseleccionar", "all": "todo", "Optimizando distribución…": "Optimizando distribución…", "El color indica el tiempo transcurrido, no las piezas colocadas.": "El color indica el tiempo transcurrido, no las piezas colocadas.", "Idioma / Language": "Idioma / Language", "Idioma de la interfaz / Interface language": "Idioma de la interfaz / Interface language", "Units": "Unidades", "Whether to work in metric or imperial. This affects display only, and not import or export.": "Permite elegir entre unidades métricas e imperiales. Solo cambia la visualización; no afecta la importación ni la exportación.", "The minimum amount of space between each part. If you're planning on using the merge common lines feature, set this to zero.": "Distancia mínima entre las piezas. Si vas a unir líneas compartidas, establece este valor en cero.", "SVG import scale": "Escala de importación SVG", "This is the conversion factor between inches/mm to SVG units. Set to 72 units/inch for Illustrator and 90 units/inch for Inkscape.": "Factor de conversión entre pulgadas o milímetros y unidades SVG. Utiliza 72 unidades/pulgada para Illustrator y 90 unidades/pulgada para Inkscape.", "Normally the scaling factor can be extracted from the SVG file itself, but when not available this value is used.": "Normalmente se obtiene la escala del propio archivo SVG. Si no está disponible, se utiliza este valor.", "When computing a nest, curved sections must be turned into line segments. Curve tolerance is the maximum acceptable error when performing this approximation. Set to a higher value to speed up the nesting process, and a lower value when more precision is required.": "Para calcular el anidado, las curvas se aproximan mediante segmentos rectos. Esta tolerancia determina el error máximo permitido. Un valor mayor acelera el cálculo; uno menor mejora la precisión.", "Real-world vectors are often messy and imprecise, sometimes the points from one path to the next does not match up exactly to form a closed path. Try increasing this value if you have trouble importing a file.": "Los archivos vectoriales pueden contener pequeños desfases entre los extremos de los trazados, lo que impide cerrarlos correctamente. Si tienes problemas al importar un archivo, prueba aumentar esta tolerancia.", "Certain geometries can be very time consuming to compute, eg. several hundred unique snowflakes. You may wish to use a simple polygon approximation to speed up the process, at the cost of greater material use.": "Las geometrías complejas, como cientos de copos de nieve diferentes, pueden tardar mucho en calcularse. La aproximación con polígonos simples acelera el proceso, aunque puede aumentar el consumo de material.", "If your vector not unique (ie. several hundred identical snowflakes) using the \"quantity\" field is another way to speed up the process dramatically.": "Si necesitas muchas copias de una misma figura, utiliza el campo «Cantidad» en lugar de importar cada copia. Esto puede acelerar considerablemente el cálculo.", "Rotations": "Rotaciones", "The number of rotations to try when inserting a part. For example, if 8 rotations are used some parts will have a 45 degree angle. 4 rotations is generally enough, and ensures that common lines are easily merged for rectangular parts. Higher rotations may help if you have extremely irregular parts.": "Cantidad de orientaciones que se prueban al colocar cada pieza. Con 8 rotaciones se permiten incrementos de 45°. En general, 4 son suficientes y facilitan unir líneas compartidas en piezas rectangulares. Para formas muy irregulares pueden ayudar más rotaciones.", "1. Gravity": "1. Gravedad", "2. Bounding Box": "2. Caja delimitadora", "3. Squeeze": "3. Compactar", "Minimize the": "Minimiza el", "of the nest. It's good for when you have a rectangular sheet and wish to use the left overs for another cut.": "del anidado. Es útil con hojas rectangulares cuando quieres conservar el sobrante para otro corte.", "Reduce the overall": "Reduce el área total", "rectangular bounds": "del rectángulo delimitador", "area": "ocupada por las piezas", ". This mode is best for conserving material when only a small portion of the sheet is used.": ". Esta opción ayuda a ahorrar material cuando se utiliza solo una parte de la hoja.", ", but may produce nests that aren't rectangular. It is best used for irregularly shaped sheets, or when all sheets will be filled with no space left behind.": ", aunque el acomodo resultante puede no ser rectangular. Es útil para hojas irregulares o cuando se busca aprovecharlas por completo.", "CPU Cores": "Núcleos de CPU", "The number of concurrent nesting processes. 2 for most laptops and 4 for most desktops.": "Número de procesos de anidado que se ejecutan simultáneamente. Se recomiendan 2 para la mayoría de las laptops y 4 para equipos de escritorio, según su capacidad.", "If set, part edges that touch will be merged into a single line in the export. Merging common lines ensure that the laser only passes over each line a single time, reducing cut time and heat warping.": "Cuando se activa, los bordes coincidentes de las piezas se exportan como una sola línea. Así el láser recorre cada borde una sola vez, reduciendo el tiempo de corte y la deformación por calor.", "When placing each part, the program has to decide between whether saving time or material is more important. When the optimization ratio is 0, only material savings are considered. When the ratio is 1, time savings are considered as important as material savings.": "Al colocar las piezas, el programa equilibra el ahorro de material y el tiempo de corte. Con un valor de 0 se prioriza únicamente el material; con 1 se considera el ahorro de tiempo tan importante como el de material.", "Reduce the total area occupied by the parts, although the resulting arrangement may not be rectangular. It is useful for irregularly shaped sheets or when you want to make full use of the material.": "Reduce el área total ocupada por las piezas, aunque la distribución resultante puede no ser rectangular. Es útil para hojas irregulares o cuando se busca aprovechar todo el material", "Optimization control": "Control de optimización", "Maximum optimization time": "Tiempo máximo de optimización", "Stop if no improvements": "Detener si no hay mejoras", "Time without improvements": "Tiempo sin mejoras", "3 minutes — Quick": "3 minutos — Rápido", "5 minutes — Normal": "5 minutos — Normal", "10 minutes — Deep": "10 minutos — Profundo", "15 minutes — Intensive": "15 minutos — Intensivo", "No time limit": "Sin límite de tiempo", "30 seconds": "30 segundos", "60 seconds": "60 segundos", "2 minutes": "2 minutos", "3 minutes": "3 minutos", "5 minutes": "5 minutos", "Laser time estimation": "Estimación del tiempo de láser", "Cut speed (mm/s)": "Velocidad de corte (mm/s)", "Travel speed (mm/s)": "Velocidad de desplazamiento (mm/s)", "Number of passes": "Número de pasadas", "Extra time per sheet (s)": "Tiempo adicional por hoja (s)", "estimated total laser time (approx.)": "Tiempo total de corte estimado", "Genetic population size": "Tamaño de población", "Genetic algorithms are a form of machine learning that mimics biological evolution. A smaller population size may lead to results more quickly but will have less genetic diversity. A larger population size could give better results, at the cost of more processing time.": "El algoritmo genético prueba distintas soluciones inspirándose en la evolución biológica. Una población pequeña ofrece resultados más rápido, pero explora menos alternativas. Una población mayor puede mejorar el acomodo, a costa de más tiempo de cálculo.", "Genetic mutation rate": "Tasa de mutación", "How much to mutate the population in each successive trial. A higher mutation rate ensures that a large variety of nest arrangements are tried, but reduces the ability of the algorithm to build upon previous successes. Increase this value if there are obvious arrangements that it does not seem to explore.": "Controla cuánto cambian las soluciones entre generaciones. Una tasa mayor permite explorar más acomodos, pero dificulta aprovechar los resultados anteriores. Auméntala si el algoritmo parece ignorar alternativas evidentes."};
+  const reverse = Object.create(null);
+  Object.keys(translations).forEach(k => { if (!Object.prototype.hasOwnProperty.call(reverse, translations[k])) reverse[translations[k]] = k; });
+  const sources = new WeakMap();
+  const titleSources = new WeakMap();
+  const ignored = new Set(['SCRIPT', 'STYLE', 'SVG', 'TEXTAREA', 'CODE', 'PRE']);
+  let language = 'es';
+  const languageSettings = require('electron-settings');
+  try {
+    const saved = languageSettings.getSync('interfaceLanguage');
+    if (saved === 'en' || saved === 'es') language = saved;
+    else languageSettings.setSync('interfaceLanguage', language);
+  } catch (err) { console.warn('[C&M i18n] Idioma predeterminado español:', err); }
+  window.cmSyncLanguageSelector = function () {
+    const selector = document.getElementById('cm-interface-language');
+    if (selector && selector.value !== language) selector.value = language;
+  };
+  function skip(node) {
+    const el = node.nodeType === 1 ? node : node.parentElement;
+    return !!(el && el.closest('script,style,svg,textarea,code,pre,[data-no-translate]'));
+  }
+  function canonical(s) {
+    return Object.prototype.hasOwnProperty.call(translations, s) ? s : (reverse[s] || s);
+  }
+  function translateNode(node) {
+    if (skip(node) || node.nodeType !== 3) return;
+    const current = node.nodeValue;
+    const trim = current.trim();
+    if (!trim) return;
+    // Ractive reuses text nodes for changing statistics. Never restore a cached
+    // translation over a new numeric value (e.g. 1 sheet or 0:10:43).
+    let src = sources.get(node);
+    const previousOutput = src && (language === 'es' ? (translations[src] || src) : src);
+    if (!src || (trim !== src && trim !== previousOutput)) {
+      src = canonical(trim.replace(/\b(segundos?|minutos?|horas?|días?)\b/g, function(unit) { return ({segundo:'second',segundos:'seconds',minuto:'minute',minutos:'minutes',hora:'hour',horas:'hours',día:'day',días:'days'})[unit] || unit; }));
+      sources.set(node, src);
+    }
+    let target = language === 'es' ? (translations[src] || src) : src;
+    // The duration formatter produces strings such as "0 seconds" and
+    // "1 minute 20 seconds", which aren't dictionary keys.
+    if (language === 'es' && !Object.prototype.hasOwnProperty.call(translations, src)) {
+      target = src.replace(/\b(seconds?|minutes?|hours?|days?)\b/g, function(unit) {
+        return ({second:'segundo',seconds:'segundos',minute:'minuto',minutes:'minutos',hour:'hora',hours:'horas',day:'día',days:'días'})[unit] || unit;
+      });
+    }
+    if (trim !== target) node.nodeValue = current.replace(trim, target);
+  }
+  function translateTitle(el) {
+    if (skip(el) || !el.hasAttribute('title')) return;
+    let src = titleSources.get(el);
+    if (!src) { src = canonical(el.getAttribute('title')); titleSources.set(el, src); }
+    el.setAttribute('title', language === 'es' ? (translations[src] || src) : src);
+  }
+  function scan(root) {
+    if (!root) return;
+    if (root.nodeType === 3) { translateNode(root); return; }
+    if (root.nodeType !== 1 || ignored.has(root.tagName)) return;
+    translateTitle(root);
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+    let n;
+    while ((n = walker.nextNode())) {
+      if (n.nodeType === 3) translateNode(n);
+      else if (!ignored.has(n.tagName)) translateTitle(n);
+    }
+  }
+  function update() {
+    document.documentElement.lang = language === 'es' ? 'es-MX' : 'en';
+    ['main','nest','message'].forEach(id => scan(document.getElementById(id)));
+    const selector = document.getElementById('cm-interface-language');
+    window.cmSyncLanguageSelector();
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    const selector = document.getElementById('cm-interface-language');
+    if (selector) {
+      window.cmSyncLanguageSelector();
+      selector.addEventListener('change', function (event) {
+        event.stopPropagation();
+        language = selector.value === 'en' ? 'en' : 'es';
+        try { languageSettings.setSync('interfaceLanguage', language); }
+        catch (err) { console.warn('[C&M i18n] No se pudo guardar el idioma:', err); }
+        update();
+      });
+    }
+    const observer = new MutationObserver(function (records) {
+      for (const record of records) {
+        if (record.type === 'childList') record.addedNodes.forEach(scan);
+        else if (record.type === 'characterData') translateNode(record.target);
+      }
+    });
+    ['main','nest','message'].forEach(id => {
+      const root = document.getElementById(id);
+      if (root) observer.observe(root, {subtree:true,childList:true,characterData:true});
+    });
+    update();
+  });
+})();
+</script>
+
 	</body>
 </html>

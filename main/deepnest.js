@@ -44,6 +44,8 @@
 		this.partsTree = [];
 		
 		this.working = false;
+		// Virtual sheet supply for automatic production batches (does not modify UI quantities).
+		this.autoSheetCapacity = null;
 		
 		var GA = null;
 		var best = null;
@@ -56,40 +58,18 @@
 		this.nests = [];
 		
 		this.importsvg = function(filename, dirpath, svgstring, scalingFactor, dxfFlag){
-			// parse svg
-			// config.scale is the default scale, and may not be applied
-			// scalingFactor is an absolute scaling that must be applied regardless of input svg contents
-			svg = SvgParser.load(dirpath, svgstring, config.scale, scalingFactor);
-			svg = SvgParser.clean(dxfFlag);
-			
-			if(filename){
-				this.imports.push({
-					filename: filename,
-					svg: svg
-				});
-			}
-			
-			var parts = this.getParts(svg.children);
-			for(var i=0; i<parts.length; i++){
-				this.parts.push(parts[i]);
-			}
-			
-			// test simplification
-			/*for(i=0; i<parts.length; i++){
-				var part = parts[i];
-				this.renderPolygon(part.polygontree, svg);
-				var simple = this.simplifyPolygon(part.polygontree);
-				this.renderPolygon(simple, svg, 'active');
-				if(part.polygontree.children){
-					for(var j=0; j<part.polygontree.children.length; j++){
-						var schild = this.simplifyPolygon(part.polygontree.children[j], true);
-						//this.renderPolygon(schild, svg, 'active');
-					}
-				}
-				//this.renderPolygon(simple.exterior, svg, 'error');
-			}*/
-		}
-		
+			// No registrar importaciones vacías ni modificar la lista de piezas si falla el parser.
+			var importedSvg = SvgParser.load(dirpath, svgstring, config.scale, scalingFactor);
+			if(!importedSvg || importedSvg.localName !== 'svg') throw new Error('Documento SVG inválido');
+			importedSvg = SvgParser.clean(dxfFlag);
+			if(!importedSvg) throw new Error('No se pudo procesar el SVG');
+			var parts = this.getParts(importedSvg.children);
+			if(!parts.length) throw new Error('No se encontraron contornos cerrados válidos');
+			if(filename) this.imports.push({filename:filename,svg:importedSvg});
+			for(var i=0;i<parts.length;i++) this.parts.push(parts[i]);
+			return parts.length;
+		};
+
 		// debug function
 		this.renderPolygon = function(poly, svg, highlight){
 			if(!poly || poly.length == 0){
@@ -953,7 +933,7 @@
 			// send only bare essentials through ipc
 			for(var i=0; i<this.parts.length; i++){
 				parts.push({
-					quantity: this.parts[i].quantity,
+					quantity: (this.parts[i].sheet && this.autoSheetCapacity !== null) ? this.autoSheetCapacity : this.parts[i].quantity,
 					sheet: this.parts[i].sheet,
 					polygontree: this.cloneTree(this.parts[i].polygontree)
 				});

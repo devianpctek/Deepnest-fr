@@ -99,7 +99,20 @@ window.db = {
 window.onload = function () {
 	const { ipcRenderer } = require('electron');
 	window.ipcRenderer = ipcRenderer;
-	window.addon = require('../build/Release/addon');
+	const fs = require('fs');
+        const path = require('path');
+
+        const packagedAddon = path.join(
+            process.resourcesPath, 'native', 'addon.node'
+        );
+
+        const developmentAddon = path.join(
+            __dirname, '..', 'build', 'Release', 'addon.node'
+        );
+
+        window.addon = require(
+            fs.existsSync(packagedAddon) ? packagedAddon : developmentAddon
+        );
 	
 	window.path = require('path')
 	window.url = require('url')
@@ -269,6 +282,7 @@ window.onload = function () {
 		  if(pairs.length > 0){
 			  var p = new Parallel(pairs, {
 				evalPath: 'util/eval.js',
+				maxWorkers: 2, // v7: at most two parallel NFP calculation workers
 				synchronous: false
 			  });
 			  
@@ -850,7 +864,7 @@ function placeParts(sheets, parts, config, nestindex){
 		var clipCache = [];
 		//console.log('new sheet');
 		for(i=0; i<parts.length; i++){
-			console.time('placement');
+			// Placement timing disabled: early continue paths leave console timers open.
 			part = parts[i];
 			
 			// inner NFP
@@ -1135,7 +1149,7 @@ function placeParts(sheets, parts, config, nestindex){
 			}
 			//console.log(placednum, totalnum);
 			ipcRenderer.send('background-progress', {index: nestindex, progress: 0.5 + 0.5*(placednum/totalnum)});
-			console.timeEnd('placement');
+			// End of placement iteration.
 		}
 		
 		//if(minwidth){

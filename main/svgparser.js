@@ -50,9 +50,11 @@
 		var svg = parser.parseFromString(svgString, "image/svg+xml");
 		this.dirPath = dirpath;
 		
-		var failed = svg.documentElement.nodeName.indexOf('parsererror')>-1;
+		var parseError = svg.getElementsByTagName('parsererror')[0];
+		var failed = !svg.documentElement || svg.documentElement.localName !== 'svg' || !!parseError;
 		if(failed){
-			console.log('svg DOM parsing error: '+svg.documentElement.nodeName);
+			var detail = parseError ? (parseError.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 320) : 'La raíz del documento no es <svg>';
+			throw new Error('SVG no válido: ' + detail);
 		}
 		if(svg){
 			// scale the svg so that our scale parameter is preserved
