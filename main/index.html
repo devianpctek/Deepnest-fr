@@ -868,7 +868,7 @@
 					slashes: true
 				  }));
 				nestwindow.setAlwaysOnTop(true);
-				nestwindow.webContents.openDevTools();
+				if (!require('electron').remote.app.isPackaged) nestwindow.webContents.openDevTools();
 				nestwindow.parts = {wat: 'wat'};
 				
 				console.log(electron.ipcRenderer.sendSync('synchronous-message', 'ping'));*/

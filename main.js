@@ -102,7 +102,7 @@ function createMainWindow() {
   mainWindow.setMenu(null);
 
   // Open the DevTools.
-  mainWindow.webContents.openDevTools()
+  if (!app.isPackaged) mainWindow.webContents.openDevTools()
 
   // Emitted when the window is closed.
   mainWindow.on('closed', function () {
@@ -134,7 +134,7 @@ function createBackgroundWindows() {
                 // Diagnóstico temporal del motor de nesting
                 back.webContents.on('did-finish-load', () => {
                     console.log('[BACKGROUND] Cargada:', back.webContents.getURL());
-                    back.webContents.openDevTools({ mode: 'detach' });
+                    if (!app.isPackaged) back.webContents.openDevTools({ mode: 'detach' });
                 });
 
                 back.webContents.on('did-fail-load', (event, code, description) => {
