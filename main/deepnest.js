@@ -56,6 +56,29 @@
 		var displayCallback = null;
 		// a running list of placements
 		this.nests = [];
+		this.cmNestProfile = null;
+		this.cmNestProfileRequest = null;
+		this.cmNestProfileEnabled = process.env.CM_NEST_PROFILE === '1';
+		this.cmSetNestProfileEnabled = function(enabled){ self.cmNestProfileEnabled = enabled === true; };
+		this.cmPauseNestProfile = function(){
+			if(!self.cmNestProfile || self.cmNestProfile.segmentStartedAt === null || self.cmNestProfile.segmentStartedAt === undefined) return;
+			self.cmNestProfile.activeAccumulatedMs = (self.cmNestProfile.activeAccumulatedMs || 0) + Math.max(0,performance.now()-self.cmNestProfile.segmentStartedAt);
+			self.cmNestProfile.segmentStartedAt=null;
+		};
+		function cmNestProfileElapsed(){
+			if(!self.cmNestProfile) return {totalMs:null,activeMs:null};
+			var now=performance.now();
+			return {totalMs:Math.max(0,now-self.cmNestProfile.startedAt),activeMs:(self.cmNestProfile.activeAccumulatedMs||0)+(self.cmNestProfile.segmentStartedAt===null?0:Math.max(0,now-self.cmNestProfile.segmentStartedAt))};
+		}
+		this.cmSetNestProfile = function(jobId, mode, target){
+			if(!self.cmNestProfileEnabled) return;
+			self.cmNestProfileRequest={jobId:jobId,mode:mode||'off',targetPieces:Number(target)||0};
+		};
+		this.cmGetNestProfileSummary = function(){
+			if(!self.cmNestProfile) return null;
+			var current=self.nests[0];
+			return Object.assign({},self.cmNestProfile,cmNestProfileElapsed(),{currentPieces:cmCountPlaced(current),currentSheets:current&&current.placements?current.placements.length:0});
+		};
 
         // C&M: remember the best *valid* placement for identical geometry/settings.
         // This is a result cache, not a seed for the genetic population.
@@ -113,7 +136,13 @@
 			var parts = this.getParts(importedSvg.children);
 			if(!parts.length) throw new Error('No se encontraron contornos cerrados válidos');
 			if(filename) this.imports.push({filename:filename,svg:importedSvg});
-			for(var i=0;i<parts.length;i++) this.parts.push(parts[i]);
+			var presentationFilename = typeof filename === 'string' && filename.trim() ? filename.trim() : null;
+			for(var i=0;i<parts.length;i++){
+				// Keep the original basename attached to its source part for the import list UI.
+				// This is presentation metadata only; geometry, IDs and nesting inputs are unchanged.
+				parts[i].cmSourceFilename = presentationFilename;
+				this.parts.push(parts[i]);
+			}
 			return parts.length;
 		};
 
@@ -968,6 +997,7 @@
 		// progressCallback is called when progress is made
 		// displayCallback is called when a new placement has been made
 		this.start = function(p, d){						
+			var self = this;
 			progressCallback = p;
 			displayCallback = d;
 			
@@ -1005,6 +1035,11 @@
                 }));
                 cmLoadBest();
             }catch(e){cmCacheKey=null;cmKnownBest=null;console.warn('[C&M] Sin caché para este trabajo',e);}
+			if(self.cmNestProfileEnabled && self.cmNestProfileRequest && (!self.cmNestProfile || self.cmNestProfile.jobId !== self.cmNestProfileRequest.jobId)){
+				var profileRequest=self.cmNestProfileRequest;
+				self.cmNestProfile = {jobId:profileRequest.jobId,mode:profileRequest.mode,targetPieces:profileRequest.targetPieces,startedAt:performance.now(),segmentStartedAt:performance.now(),activeAccumulatedMs:0,generations:0,evaluationsSent:0,evaluationsCompleted:0,firstCompleteMs:null,firstCompleteActiveMs:null,bestFoundAtMs:null,bestFoundAtActiveMs:null,bestPlaced:0,bestSheets:null,reusedBest:cmKnownBest?{pieces:cmCountPlaced(cmKnownBest),sheets:cmKnownBest.placements.length}:null,reusedBestApplied:0};
+			}
+			if(self.cmNestProfile && self.cmNestProfile.segmentStartedAt === null) self.cmNestProfile.segmentStartedAt=performance.now();
 
 			// offset tree recursively
 			function offsetTree(t, offset, offsetFunction, simpleFunction, inside){
@@ -1042,7 +1077,6 @@
 				}
 			}
 			
-			var self = this;
 			this.working = true;
 			
 			if(!workerTimer){
@@ -1061,11 +1095,18 @@
 			}
 			GA.population[payload.index].processing = false;
 			GA.population[payload.index].fitness = payload.fitness;
+			if(self.cmNestProfile){
+				self.cmNestProfile.evaluationsCompleted++;
+				var rawPlaced=cmCountPlaced(payload), elapsed=cmNestProfileElapsed();
+				if(self.cmNestProfile.firstCompleteMs===null && self.cmNestProfile.targetPieces>0 && rawPlaced>=self.cmNestProfile.targetPieces){self.cmNestProfile.firstCompleteMs=elapsed.totalMs;self.cmNestProfile.firstCompleteActiveMs=elapsed.activeMs;}
+				if(cmBetter(payload,self.nests[0])){self.cmNestProfile.bestFoundAtMs=elapsed.totalMs;self.cmNestProfile.bestFoundAtActiveMs=elapsed.activeMs;self.cmNestProfile.bestPlaced=rawPlaced;self.cmNestProfile.bestSheets=payload.placements?payload.placements.length:0;}
+			}
 			
             // A complete solution on fewer sheets always beats one on more sheets.
             // Recover the cached best only after the new run has returned a valid result,
             // so the previous preview never appears while a new job is starting.
             if(cmKnownBest && cmBetter(cmKnownBest,payload)){
+                if(self.cmNestProfile) self.cmNestProfile.reusedBestApplied++;
                 payload=Object.assign({},cmKnownBest,{index:payload.index});
             }
             if(cmBetter(payload,this.nests[0])){
@@ -1123,6 +1164,7 @@
 				});
 				
 				GA = new GeneticAlgorithm(adam, config);
+				if(self.cmNestProfile) self.cmNestProfile.generations=1;
 				//console.log(GA.population[1].placement);				
 			}
 									
@@ -1139,6 +1181,7 @@
 				console.log('new generation!');
 				// all individuals have been evaluated, start next generation
 				GA.generation();
+				if(self.cmNestProfile) self.cmNestProfile.generations++;
 			}
 			
 			var running = GA.population.filter(function(p){
@@ -1170,6 +1213,7 @@
 				// only one background window now...
 				if(running < 1 && !GA.population[i].processing && !GA.population[i].fitness){
 					GA.population[i].processing = true;
+					if(self.cmNestProfile) self.cmNestProfile.evaluationsSent++;
 										
 					// hash values on arrays don't make it across ipc, store them in an array and reassemble on the other side....
 					var ids = [];

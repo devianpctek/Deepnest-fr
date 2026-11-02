@@ -527,6 +527,7 @@ animation: dash 20s linear forwards;
 #parts table{
 width: 100%;
 min-width: 28em;
+table-layout: fixed;
 margin: 0;
 padding: 0;
 color: #B1B5BC;
@@ -534,6 +535,8 @@ border-collapse: collapse;
 cursor: default;
 font-size: 0.9em;
 }
+/* The parts list keeps its light surface in both themes, so keep its text dark too. */
+html[data-cm-theme] #parts table { color: #242424; }
 
 #parts table thead tr{
 padding: 0 1em;
@@ -653,6 +656,18 @@ stroke-linejoin: round !important;
 stroke: #fff !important;
 }
 
+/* Keep source names beside their thumbnail without widening the parts table. */
+#parts table tbody tr td:first-child { width: 70%; padding-left: 0.55em; }
+#parts table thead tr th:first-child { width: 70%; }
+#parts table tbody tr td:nth-child(2), #parts table thead tr th:nth-child(2) { width: 15%; }
+#parts table tbody tr td:nth-child(3), #parts table thead tr th:nth-child(3) { width: 15%; }
+.cm-part-identity { display: flex; align-items: center; gap: 0.55em; min-width: 0; }
+.cm-part-thumbnail { flex: 0 0 4em; width: 4em; min-width: 0; }
+#parts table .cm-part-thumbnail svg { display: block; width: 4em; max-width: 4em; height: 3em; max-height: 3em; margin: 0; }
+.cm-part-file-info { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.cm-part-filename { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cm-part-dimensions { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 0.78em; opacity: 0.78; }
+
 /* parts tools */
 #partstools{
 position: absolute;
@@ -744,6 +759,13 @@ margin: 0;
 padding: 0;
 cursor: default;
 background-color: #CDD8E0;
+display: flex;
+flex-flow: row nowrap;
+align-items: flex-end;
+box-sizing: border-box;
+overflow-x: auto;
+overflow-y: hidden;
+white-space: nowrap;
 }
 
 #importsnav li{
@@ -753,8 +775,23 @@ padding: 0 0.75em 0 1.5em;
 height: 2.3em;
 line-height: 2.3em;
 background-color: #E4E8ED;
-float: left;
+display: flex;
+align-items: center;
+flex: 0 0 150px;
+width: 150px;
+min-width: 150px;
+max-width: 150px;
+box-sizing: border-box;
+overflow: hidden;
 border-bottom: none;
+}
+
+#importsnav li .cm-import-tab-name {
+flex: 1 1 auto;
+min-width: 0;
+overflow: hidden;
+white-space: nowrap;
+text-overflow: ellipsis;
 }
 
 #importsnav li:first-child{
@@ -785,8 +822,10 @@ width: 1.5em;
 height: 1.5em;
 border-radius: 1.5em;
 margin-left: 0.5em;
-position: relative;
-top: 0.5em;
+position: static;
+top: auto;
+flex: 0 0 1.5em;
+min-width: 1.5em;
 cursor: default;
 }
 
@@ -2070,6 +2109,11 @@ html[data-cm-theme] #nest > .topnav > li.button,
 html[data-cm-theme] #nest > .topnav > #export_wrapper > li.button,
 html[data-cm-theme] #nest > .topnav > button {box-sizing:border-box!important;height:30px!important;min-height:30px!important;margin:0!important;padding:0 13px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;line-height:1!important;vertical-align:middle!important;border-radius:7px!important;}
 html[data-cm-theme] #nest > .topnav > #export_wrapper {display:inline-flex!important;align-items:center!important;margin:0!important;}
+html[data-cm-theme] #cm-debug-actions {display:inline-flex;align-items:center;gap:5px;margin-left:auto;min-width:0;max-width:52vw;overflow:hidden;}
+html[data-cm-theme] #cm-debug-actions button {height:30px;min-width:0;max-width:155px;padding:0 9px;border:1px solid var(--cm-border);border-radius:6px;background:var(--cm-panel);color:var(--cm-ink);font:inherit;font-size:.76em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;}
+html[data-cm-theme] #cm-debug-actions button:disabled {opacity:.55;cursor:not-allowed;}
+html[data-cm-theme] #cm-debug-snapshot-status {max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.68em;color:var(--cm-muted);}
+@media(max-width:900px){html[data-cm-theme] #cm-debug-actions{max-width:44vw;gap:3px;}html[data-cm-theme] #cm-debug-actions button{max-width:115px;padding:0 5px;font-size:.68em;}}
 
 /* C&M v1.0.1: preserve the icon gutter in the results toolbar.
    The previous 0 13px !important padding overlapped SVG background icons. */

@@ -1,6 +1,6 @@
 # Deepnest — C&M Designs Edition
 
-**Version 1.0.0 / Versión 1.0.0**  
+**Version 1.1.0 / Versión 1.1.0**<br>
 **Languages / Idiomas:** English · Español
 
 A customized edition of Deepnest for laser-cutting workflows and efficient sheet-material nesting.
@@ -36,8 +36,8 @@ Deepnest — C&M Designs Edition builds on the original Deepnest project with wo
 3. Run it.
 
 ~~~bash
-chmod +x Deepnest-CM-Designs-Edition-1.0.0-x86_64.AppImage
-./Deepnest-CM-Designs-Edition-1.0.0-x86_64.AppImage
+chmod +x Deepnest-CM-Designs-Edition-1.1.0-x86_64.AppImage
+./Deepnest-CM-Designs-Edition-1.1.0-x86_64.AppImage
 ~~~
 
 The filename above is the intended release filename; use the actual downloaded filename if it differs.
@@ -83,8 +83,8 @@ Deepnest — C&M Designs Edition parte del proyecto original Deepnest e incorpor
 3. Ejecútalo.
 
 ~~~bash
-chmod +x Deepnest-CM-Designs-Edition-1.0.0-x86_64.AppImage
-./Deepnest-CM-Designs-Edition-1.0.0-x86_64.AppImage
+chmod +x Deepnest-CM-Designs-Edition-1.1.0-x86_64.AppImage
+./Deepnest-CM-Designs-Edition-1.1.0-x86_64.AppImage
 ~~~
 
 El nombre anterior es el previsto para la publicación; si el archivo descargado tiene otro nombre, utiliza ese nombre real.

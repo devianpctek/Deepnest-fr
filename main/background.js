@@ -1,5 +1,18 @@
 'use strict';
 
+var cmTotalTimerSequence = 0;
+function cmNextTotalTimerLabel(){
+	return 'Total ' + (++cmTotalTimerSequence);
+}
+
+var cmNestProfile = null;
+function cmProfileAddCount(name, amount){
+	try{if(cmNestProfile) cmNestProfile.counts[name]=(cmNestProfile.counts[name]||0)+amount;}catch(e){}
+}
+function cmProfileSetCount(name, value){
+	try{if(cmNestProfile) cmNestProfile.counts[name]=value;}catch(e){}
+}
+
 
 function clone(nfp){
 	var newnfp = [];
@@ -121,8 +134,63 @@ window.onload = function () {
 	window.fq = new FileQueue(500);
 	
 	window.nfpcache = {};
+	var cmProfileHooksInstalled = false;
+	function cmProfileNow(){
+		try{if(process.hrtime && typeof process.hrtime.bigint === 'function') return Number(process.hrtime.bigint())/1e6;}catch(e){}
+		try{if(performance && typeof performance.now === 'function') return performance.now();}catch(e){}
+		return 0;
+	}
+	function cmProfileMeasure(name, fn){
+		if(!cmNestProfile) return fn();
+		var start, parent, frame;
+		try{
+			start=cmProfileNow();
+			parent=cmNestProfile.stack[cmNestProfile.stack.length-1];
+			frame={name:name,child:0}; cmNestProfile.stack.push(frame);
+		}catch(profileError){return fn();}
+		try{return fn();}finally{
+			try{
+				var elapsed=Math.max(0,cmProfileNow()-start); cmNestProfile.stack.pop();
+				var stat=cmNestProfile.scopes[name] || (cmNestProfile.scopes[name]={calls:0,inclusiveMs:0,exclusiveMs:0,minInclusiveMs:null,maxInclusiveMs:0});
+				stat.calls++; stat.inclusiveMs+=elapsed; stat.exclusiveMs+=Math.max(0,elapsed-frame.child);
+				stat.minInclusiveMs=stat.minInclusiveMs===null?elapsed:Math.min(stat.minInclusiveMs,elapsed); stat.maxInclusiveMs=Math.max(stat.maxInclusiveMs,elapsed);
+				if(parent) parent.child+=elapsed;
+			}catch(profileError){ /* La telemetría no debe enmascarar el resultado geométrico ni su error. */ }
+		}
+	}
+	function cmProfileWrap(name, owner, method){
+		if(!owner || typeof owner[method] !== 'function' || owner[method]._cmProfileWrapped) return;
+		var original=owner[method];
+		var wrapped=function(){var self=this,args=arguments;return cmProfileMeasure(name,function(){return original.apply(self,args);});};
+		wrapped._cmProfileWrapped=true; owner[method]=wrapped;
+	}
+	function cmProfileInstallHooks(){
+		if(!cmNestProfile || cmProfileHooksInstalled) return;
+		cmProfileHooksInstalled=true;
+		var originalInner=getInnerNfp, originalOuter=getOuterNfp;
+		getInnerNfp=function(){var args=arguments; return cmProfileMeasure('nfpInner',function(){return originalInner.apply(null,args);});};
+		getOuterNfp=function(){var args=arguments; return cmProfileMeasure('nfpOuter',function(){return originalOuter.apply(null,args);});};
+		cmProfileWrap('addonCalculateNFP', addon, 'calculateNFP');
+		if(typeof ClipperLib !== 'undefined' && ClipperLib.Clipper){
+			cmProfileWrap('clipperExecute',ClipperLib.Clipper.prototype,'Execute');
+			cmProfileWrap('clipperMinkowskiSum',ClipperLib.Clipper,'MinkowskiSum');
+		}
+	}
 	  
 	ipcRenderer.on('background-start', (event, data) => {
+		var profileEnabled=!!(data && data.cmProfileEnabled && Number.isSafeInteger(data.rectNfpJobId));
+		cmNestProfile=profileEnabled ? {jobId:data.rectNfpJobId,mode:data.rectNfpMode||'off',stack:[],scopes:{},counts:{},timings:{},startedAt:cmProfileNow()} : null;
+		var rectCompareBefore=cmRectInnerNfpDiagnostics.compared, rectDifferentBefore=cmRectInnerNfpDiagnostics.different;
+		if(profileEnabled){
+			try{cmProfileInstallHooks();}catch(profileError){console.warn('[C&M profile] No se pudieron instalar timers:',profileError);}
+		}
+		var jobMode = data && data.rectNfpMode;
+		if(jobMode !== 'off' && jobMode !== 'compare' && jobMode !== 'fast') jobMode = cmRectInnerNfpMode;
+		cmRectInnerNfpMode = jobMode;
+		cmRectInnerNfpDiagnostics.mode = cmRectInnerNfpMode;
+		if(data && Number.isSafeInteger(data.rectNfpJobId)){
+			ipcRenderer.send('background-nfp-mode-active', { jobId:data.rectNfpJobId, mode:cmRectInnerNfpMode });
+		}
 		var index = data.index;
 	    var individual = data.individual;
 
@@ -148,15 +216,9 @@ window.onload = function () {
 		}
 		
 		// preprocess
+		var pairPrepareStarted=profileEnabled?cmProfileNow():0;
 		var pairs = [];
-		var inpairs = function(key, p){
-			for(var i=0; i<p.length; i++){
-				if(p[i].Asource == key.Asource && p[i].Bsource == key.Bsource && p[i].Arotation == key.Arotation && p[i].Brotation == key.Brotation){
-					return true;
-				}
-			}
-			return false;
-		}
+		var seenPairs = new Set();
 		for(var i=0; i<parts.length; i++){
 			var B = parts[i];
 			for(var j=0; j<i; j++){
@@ -175,15 +237,30 @@ window.onload = function () {
 					Arotation: A.rotation,
 					Brotation: B.rotation
 				}
-				if(!inpairs(key, pairs) && !db.has(doc)){
+				var pairKey;
+				var duplicate = false;
+				if(pairs.length > 0){
+					pairKey = JSON.stringify([key.Asource, key.Bsource, key.Arotation, key.Brotation]);
+					duplicate = seenPairs.has(pairKey);
+				}
+				var pairCacheHas = duplicate ? false : db.has(doc);
+				if(profileEnabled && !duplicate){cmProfileAddCount('pairDbHasCalls',1);if(pairCacheHas)cmProfileAddCount('pairDbHasHits',1);}
+				if(!duplicate && !pairCacheHas){
+					if(pairKey === undefined){
+						pairKey = JSON.stringify([key.Asource, key.Bsource, key.Arotation, key.Brotation]);
+					}
+					seenPairs.add(pairKey);
 					pairs.push(key);
 				}
 			}
 		}
+		if(profileEnabled){cmProfileSetCount('pairsPrepared',pairs.length);try{cmNestProfile.timings.pairPrepareMs=cmProfileNow()-pairPrepareStarted;}catch(profileError){}}
 		
 		console.log('pairs: ',pairs.length);
 		  
 		  var process = function(pair){
+			var workerStarted=null;
+			try{if(pair._cmProfileEnabled)workerStarted=performance.now();}catch(e){}
 			
 			var A = rotatePolygon(pair.A, pair.Arotation);
 			var B = rotatePolygon(pair.B, pair.Brotation);
@@ -198,7 +275,10 @@ window.onload = function () {
 				Bc[i].X *= -1;
 				Bc[i].Y *= -1;
 			}
+			var minkowskiStarted=null;
+			try{if(pair._cmProfileEnabled)minkowskiStarted=performance.now();}catch(e){}
 			var solution = ClipperLib.Clipper.MinkowskiSum(Ac, Bc, true);
+			try{if(pair._cmProfileEnabled && minkowskiStarted!==null)pair._cmWorkerMinkowskiMs=Math.max(0,performance.now()-minkowskiStarted);}catch(e){}
 			var clipperNfp;
 		
 			var largestArea = null;
@@ -219,6 +299,7 @@ window.onload = function () {
 			pair.A = null;
 			pair.B = null;
 			pair.nfp = clipperNfp;
+			try{if(pair._cmProfileEnabled && workerStarted!==null)pair._cmWorkerMs=Math.max(0,performance.now()-workerStarted);}catch(e){}
 			return pair;
 			
 			function toClipperCoordinates(polygon){
@@ -270,16 +351,30 @@ window.onload = function () {
 				c++;
 			}
 			console.log('nfp cached:', c);
-		  	var placement = placeParts(data.sheets, parts, data.config, index);
+			var placeStarted=profileEnabled?cmProfileNow():0;
+			var placement = profileEnabled ? cmProfileMeasure('placeParts',function(){return placeParts(data.sheets, parts, data.config, index);}) : placeParts(data.sheets, parts, data.config, index);
+			if(profileEnabled){try{cmNestProfile.counts.piecesPlacedInEvaluation=(placement.placements||[]).reduce(function(n,s){return n+((s&&s.sheetplacements)||[]).length;},0);cmNestProfile.counts.sheetsUsedInEvaluation=(placement.placements||[]).length;cmNestProfile.timings.placePartsWallMs=cmProfileNow()-placeStarted;}catch(profileError){console.warn('[C&M profile] No se pudieron registrar métricas de colocación:',profileError);}}
 	
 			placement.index = data.index;
+			if(profileEnabled){
+				try{
+					cmNestProfile.timings.backgroundWallMs=cmProfileNow()-cmNestProfile.startedAt;
+					cmNestProfile.counts.rectCompareAttempts=Math.max(cmNestProfile.counts.rectCompareAttempts||0,cmRectInnerNfpDiagnostics.compared-rectCompareBefore);
+					cmNestProfile.counts.rectCompareDifferent=cmRectInnerNfpDiagnostics.different-rectDifferentBefore;
+					if(cmNestProfile.mode==='fast') cmNestProfile.counts.fastModeEvaluations=1;
+					ipcRenderer.send('background-profile-evaluation',{jobId:cmNestProfile.jobId,metrics:{scopes:cmNestProfile.scopes,counts:cmNestProfile.counts,timings:cmNestProfile.timings}});
+				}catch(profileError){ console.warn('[C&M profile] No se pudieron enviar métricas de evaluación:',profileError); }
+			}
 			ipcRenderer.send('background-response', placement);
 		  }
 		  
-		  console.time('Total');
+	  var totalTimerLabel = cmNextTotalTimerLabel();
+	  console.time(totalTimerLabel);
 		  
 		  
 		  if(pairs.length > 0){
+			  if(profileEnabled) pairs.forEach(function(pair){pair._cmProfileEnabled=true;});
+			  var parallelStart=profileEnabled?cmProfileNow():0;
 			  var p = new Parallel(pairs, {
 				evalPath: 'util/eval.js',
 				maxWorkers: 2, // v7: at most two parallel NFP calculation workers
@@ -298,6 +393,15 @@ window.onload = function () {
 			  p.require('geometryutil.js');
 		  
 			  p.map(process).then(function(processed){
+				var pairPostprocessStarted=profileEnabled?cmProfileNow():0;
+				if(profileEnabled){
+					try{
+						cmNestProfile.timings.pairParallelWallMs=cmProfileNow()-parallelStart;
+						cmNestProfile.counts.clipWorkerCalls=processed.length;
+						cmNestProfile.timings.pairWorkerMs=0;cmNestProfile.timings.workerMinkowskiMs=0;
+						processed.forEach(function(pair){cmNestProfile.timings.pairWorkerMs+=pair._cmWorkerMs||0;cmNestProfile.timings.workerMinkowskiMs+=pair._cmWorkerMinkowskiMs||0;delete pair._cmProfileEnabled;delete pair._cmWorkerMs;delete pair._cmWorkerMinkowskiMs;});
+					}catch(profileError){console.warn('[C&M profile] No se pudieron agregar tiempos de pares:',profileError);}
+				}
 			  	 function getPart(source){
 					for(var k=0; k<parts.length; k++){
 						if(parts[k].source == source){
@@ -350,12 +454,14 @@ window.onload = function () {
 					window.db.insert(doc);
 					
 				}
-				console.timeEnd('Total');
+				console.timeEnd(totalTimerLabel);
 				console.log('before sync');
+				if(profileEnabled){try{cmNestProfile.timings.pairPostprocessMs=cmProfileNow()-pairPostprocessStarted;}catch(profileError){}}
 				sync();
 			  });
 		  }
 		  else{
+			console.timeEnd(totalTimerLabel);
 		  	sync();
 		  }
 	});
@@ -648,6 +754,7 @@ function getOuterNfp(A, B, inside){
 	
 	// try the file cache if the calculation will take a long time
 	var doc = window.db.find({ A: A.source, B: B.source, Arotation: A.rotation, Brotation: B.rotation });
+	if(typeof cmNestProfile !== 'undefined' && cmNestProfile){cmProfileAddCount('outerCacheLookups',1);cmProfileAddCount(doc?'outerCacheHits':'outerCacheMisses',1);}
 	
 	if(doc){
 		return doc;
@@ -745,14 +852,200 @@ function getFrame(A){
 	return frame;
 }
 
+// Experimental rectangular inner-NFP mode. The main process resolves the
+// environment override and sends a fixed mode with each nesting job's evaluations.
+// The environment fallback keeps the existing diagnostic launch path available.
+var cmRectInnerNfpMode = 'off';
+try{
+	var requestedRectMode = String(process.env.CM_RECT_NFP_MODE || 'off').trim().toLowerCase();
+	if(requestedRectMode === 'compare' || requestedRectMode === 'fast'){
+		cmRectInnerNfpMode = requestedRectMode;
+	}
+}catch(e){}
+
+var cmRectInnerNfpDiagnostics = { mode: cmRectInnerNfpMode, compared: 0, different: 0, logged: 0, last: null };
+window.cmRectInnerNfpDiagnostics = cmRectInnerNfpDiagnostics;
+
+function cmRectFiniteRing(poly){
+	if(!Array.isArray(poly)) return null;
+	var count = poly.length;
+	if(count > 1 && poly[0] && poly[count-1] && poly[0].x === poly[count-1].x && poly[0].y === poly[count-1].y) count--;
+	if(count < 3 || count > 256) return null;
+	var points = [];
+	for(var i=0; i<count; i++){
+		var p = poly[i];
+		if(!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+		var previous = poly[(i+count-1)%count];
+		if(!previous || (p.x === previous.x && p.y === previous.y)) return null;
+		points.push(p);
+	}
+	var area = GeometryUtil.polygonArea(points);
+	if(!Number.isFinite(area) || area === 0) return null;
+	// Reject self-intersecting and touching non-adjacent edges; do not guess at
+	// containment for malformed piece geometry.
+	for(var a=0; a<count; a++){
+		var a1=points[a], a2=points[(a+1)%count];
+		for(var b=a+1; b<count; b++){
+			if(b === a || b === (a+1)%count || (b+1)%count === a) continue;
+			var b1=points[b], b2=points[(b+1)%count];
+			var d1=(a2.x-a1.x)*(b1.y-a1.y)-(a2.y-a1.y)*(b1.x-a1.x);
+			var d2=(a2.x-a1.x)*(b2.y-a1.y)-(a2.y-a1.y)*(b2.x-a1.x);
+			var d3=(b2.x-b1.x)*(a1.y-b1.y)-(b2.y-b1.y)*(a1.x-b1.x);
+			var d4=(b2.x-b1.x)*(a2.y-b1.y)-(b2.y-b1.y)*(a2.x-b1.x);
+			if(((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return null;
+			if(d1 === 0 || d2 === 0 || d3 === 0 || d4 === 0){
+				var minAx=Math.min(a1.x,a2.x), maxAx=Math.max(a1.x,a2.x), minAy=Math.min(a1.y,a2.y), maxAy=Math.max(a1.y,a2.y);
+				var minBx=Math.min(b1.x,b2.x), maxBx=Math.max(b1.x,b2.x), minBy=Math.min(b1.y,b2.y), maxBy=Math.max(b1.y,b2.y);
+				if(maxAx >= minBx && maxBx >= minAx && maxAy >= minBy && maxBy >= minAy) return null;
+			}
+		}
+	}
+	return points;
+}
+
+function cmRectPointInRing(point, ring){
+	var inside=false;
+	for(var i=0,j=ring.length-1; i<ring.length; j=i++){
+		var a=ring[j], b=ring[i];
+		if(((b.y > point.y) !== (a.y > point.y)) && point.x < (a.x-b.x)*(point.y-b.y)/(a.y-b.y)+b.x) inside=!inside;
+	}
+	return inside;
+}
+
+function cmRectRingsIntersect(a, b){
+	function orient(p,q,r){ return (q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x); }
+	function onSegment(p,q,r){ return q.x>=Math.min(p.x,r.x) && q.x<=Math.max(p.x,r.x) && q.y>=Math.min(p.y,r.y) && q.y<=Math.max(p.y,r.y); }
+	for(var i=0;i<a.length;i++){
+		var p1=a[i], p2=a[(i+1)%a.length];
+		for(var j=0;j<b.length;j++){
+			var q1=b[j], q2=b[(j+1)%b.length];
+			var o1=orient(p1,p2,q1), o2=orient(p1,p2,q2), o3=orient(q1,q2,p1), o4=orient(q1,q2,p2);
+			if(((o1>0 && o2<0)||(o1<0 && o2>0)) && ((o3>0 && o4<0)||(o3<0 && o4>0))) return true;
+			if((o1===0 && onSegment(p1,q1,p2)) || (o2===0 && onSegment(p1,q2,p2)) || (o3===0 && onSegment(q1,p1,q2)) || (o4===0 && onSegment(q1,p2,q2))) return true;
+		}
+	}
+	return false;
+}
+
+function cmRectChildrenContained(parent, children){
+	if(!children) return true;
+	if(!Array.isArray(children)) return false;
+	for(var i=0;i<children.length;i++){
+		var ring=cmRectFiniteRing(children[i]);
+		if(!ring || cmRectRingsIntersect(parent,ring)) return false;
+		for(var j=0;j<ring.length;j++) if(!cmRectPointInRing(ring[j],parent)) return false;
+		if(!cmRectChildrenContained(ring,children[i].children)) return false;
+	}
+	return true;
+}
+
+function cmTryRectangularInnerNfp(A, B, config){
+	function reject(reason){ return { nfp:null, reason:reason }; }
+	if(!Array.isArray(A) || !Array.isArray(B)) return reject('not-arrays');
+	if(A.children !== undefined && !Array.isArray(A.children)) return reject('invalid-sheet-children');
+	if(A.children && A.children.length) return reject('sheet-has-holes');
+	if(A.rotation !== undefined && A.rotation !== 0) return reject('sheet-rotation');
+	if(!Number.isFinite(B.rotation)) return reject('invalid-part-rotation');
+	var scale=config && config.clipperScale;
+	if(!Number.isFinite(scale) || scale <= 0) return reject('invalid-clipper-scale');
+	var count=A.length;
+	if(count===5 && A[0] && A[4] && A[0].x===A[4].x && A[0].y===A[4].y) count=4;
+	if(count!==4) return reject('sheet-vertex-count');
+	for(var i=0;i<count;i++) if(!A[i] || !Number.isFinite(A[i].x) || !Number.isFinite(A[i].y)) return reject('non-finite-sheet-coordinate');
+	var ab=GeometryUtil.getPolygonBounds(A), xmax=ab.x+ab.width, ymax=ab.y+ab.height;
+	if(![ab.x,ab.y,ab.width,ab.height,xmax,ymax].every(Number.isFinite) || ab.width<=0 || ab.height<=0) return reject('invalid-sheet-bounds');
+	var corners=new Set();
+	for(i=0;i<count;i++){
+		if((A[i].x!==ab.x && A[i].x!==xmax) || (A[i].y!==ab.y && A[i].y!==ymax)) return reject('sheet-not-axis-aligned-rectangle');
+		var next=A[(i+1)%count];
+		if((A[i].x!==next.x && A[i].y!==next.y) || (A[i].x===next.x && A[i].y===next.y)) return reject('invalid-sheet-edge');
+		corners.add(A[i].x+','+A[i].y);
+	}
+	if(corners.size!==4) return reject('invalid-sheet-corners');
+	var outer=cmRectFiniteRing(B);
+	if(!outer) return reject('invalid-or-complex-part-ring');
+	if(!cmRectChildrenContained(outer,B.children)) return reject('invalid-or-complex-part-hole');
+	var bb=GeometryUtil.getPolygonBounds(outer);
+	if(![bb.x,bb.y,bb.width,bb.height,bb.x+bb.width,bb.y+bb.height].every(Number.isFinite) || bb.width<=0 || bb.height<=0) return reject('invalid-part-bounds');
+	var scaledBounds=[ab.x,ab.y,xmax,ymax,bb.x,bb.y,bb.x+bb.width,bb.y+bb.height].map(function(value){return value*scale;});
+	if(!scaledBounds.every(function(value){return Number.isFinite(value) && Math.abs(value)<Number.MAX_SAFE_INTEGER-16;})) return reject('scaled-coordinate-out-of-safe-range');
+	var clearanceX=ab.width-bb.width, clearanceY=ab.height-bb.height;
+	// Keep a four-grid-unit minimum raw clearance, then retain at least two
+	// grid units between the one-unit-inset endpoints. Exact/near-grid fits use
+	// the general addon path rather than a degenerate rectangular NFP.
+	if(!Number.isFinite(clearanceX) || !Number.isFinite(clearanceY) || clearanceX*scale<=4 || clearanceY*scale<=4) return reject('clearance-near-clipper-grid');
+	var x0=(Math.ceil((ab.x-bb.x)*scale)+1)/scale;
+	var y0=(Math.ceil((ab.y-bb.y)*scale)+1)/scale;
+	var x1=(Math.floor((xmax-(bb.x+bb.width))*scale)-1)/scale;
+	var y1=(Math.floor((ymax-(bb.y+bb.height))*scale)-1)/scale;
+	if(![x0,y0,x1,y1].every(Number.isFinite) || x1-x0<2/scale || y1-y0<2/scale) return reject('degenerate-inset-region');
+	// Return B[0] placement coordinates, matching the clockwise general-NFP
+	// convention. Clipper closes paths itself, so do not repeat the first point.
+	var bx=B[0].x, by=B[0].y;
+	var nfp=[[{x:x1+bx,y:y1+by},{x:x1+bx,y:y0+by},{x:x0+bx,y:y0+by},{x:x0+bx,y:y1+by}]];
+	if(!nfp[0].every(function(p){return Number.isFinite(p.x)&&Number.isFinite(p.y);})) return reject('non-finite-result');
+	return {nfp:nfp,reason:null};
+}
+
+function cmNfpSummary(nfp, B){
+	if(!nfp || !nfp.length) return {polygons:0,vertices:0,area:0,bounds:null,first:null,orientation:[],vertexSet:[]};
+	var points=[], area=0, vertices=0, orientation=[], vertexSet=[];
+	for(var i=0;i<nfp.length;i++){
+		var count=nfp[i].length;
+		if(count>1 && nfp[i][0].x===nfp[i][count-1].x && nfp[i][0].y===nfp[i][count-1].y) count--;
+		vertices+=count;
+		var polygonArea=GeometryUtil.polygonArea(nfp[i]);
+		area+=Math.abs(polygonArea);
+		orientation.push(polygonArea>0?1:(polygonArea<0?-1:0));
+		for(var j=0;j<count;j++){
+			points.push(nfp[i][j]);
+			vertexSet.push(nfp[i][j].x+','+nfp[i][j].y);
+		}
+	}
+	var bounds=points.length?GeometryUtil.getPolygonBounds(points):null, first=null;
+	for(i=0;i<points.length;i++){
+		var x=points[i].x-B[0].x, y=points[i].y-B[0].y;
+		if(!first || x<first.x || (GeometryUtil.almostEqual(x,first.x) && y<first.y)) first={x:x,y:y};
+	}
+	vertexSet.sort();
+	return {polygons:nfp.length,vertices:vertices,area:area,bounds:bounds,first:first,orientation:orientation,vertexSet:vertexSet};
+}
+
+function cmCompareRectNfp(rectNfp, generalNfp, B, reason){
+	var rect=cmNfpSummary(rectNfp,B), general=cmNfpSummary(generalNfp,B);
+	var delta={area:Math.abs(rect.area-general.area),bounds:null,first:null};
+	if(rect.bounds && general.bounds) delta.bounds={
+		x:Math.max(Math.abs(rect.bounds.x-general.bounds.x),Math.abs((rect.bounds.x+rect.bounds.width)-(general.bounds.x+general.bounds.width))),
+		y:Math.max(Math.abs(rect.bounds.y-general.bounds.y),Math.abs((rect.bounds.y+rect.bounds.height)-(general.bounds.y+general.bounds.height)))
+	};
+	if(rect.first && general.first) delta.first={x:Math.abs(rect.first.x-general.first.x),y:Math.abs(rect.first.y-general.first.y)};
+	var different=rect.polygons!==general.polygons || rect.vertices!==general.vertices || JSON.stringify(rect.vertexSet)!==JSON.stringify(general.vertexSet) || JSON.stringify(rect.orientation)!==JSON.stringify(general.orientation) || delta.area>0 || !delta.bounds || delta.bounds.x>0 || delta.bounds.y>0 || !delta.first || delta.first.x>0 || delta.first.y>0;
+	var d=cmRectInnerNfpDiagnostics;
+	d.compared++; if(different) d.different++;
+	d.last={different:different,reason:reason||null,rect:rect,general:general,delta:delta};
+	if(different && d.logged<3){
+		d.logged++;
+		console.info('[C&M experimental rectangular NFP]',JSON.stringify(d.last));
+	}
+}
+
 function getInnerNfp(A, B, config){
+	var rectResult=null;
+	if(cmRectInnerNfpMode==='compare'){if(typeof cmNestProfile !== 'undefined' && cmNestProfile)cmProfileAddCount('rectCompareAttempts',1);rectResult=cmTryRectangularInnerNfp(A,B,config);}
 	if(typeof A.source !== 'undefined' && typeof B.source !== 'undefined'){
 		var doc = window.db.find({ A: A.source, B: B.source, Arotation: 0, Brotation: B.rotation }, true);
+		if(typeof cmNestProfile !== 'undefined' && cmNestProfile){cmProfileAddCount('innerCacheLookups',1);cmProfileAddCount(doc?'innerCacheHits':'innerCacheMisses',1);}
 	
 		if(doc){
-			//console.log('fetch inner', A.source, B.source, doc);
+			if(rectResult && rectResult.nfp) cmCompareRectNfp(rectResult.nfp,doc,B,null);
 			return doc;
 		}
+	}
+
+	if(cmRectInnerNfpMode==='fast'){
+		rectResult=cmTryRectangularInnerNfp(A,B,config);
+		if(rectResult.nfp){if(typeof cmNestProfile !== 'undefined' && cmNestProfile)cmProfileAddCount('rectFastUsed',1);return rectResult.nfp;}
+		if(typeof cmNestProfile !== 'undefined' && cmNestProfile)cmProfileAddCount('rectFallback',1);
 	}
 	
 	var frame = getFrame(A);
@@ -760,6 +1053,7 @@ function getInnerNfp(A, B, config){
 	var nfp = getOuterNfp(frame, B, true);
 		
 	if(!nfp || !nfp.children || nfp.children.length == 0){
+		if(cmRectInnerNfpMode==='compare' && rectResult && rectResult.nfp) cmCompareRectNfp(rectResult.nfp,null,B,'general-returned-null');
 		return null;
 	}
 	
@@ -774,6 +1068,7 @@ function getInnerNfp(A, B, config){
 	}
 		
 	if(holes.length == 0){
+		if(cmRectInnerNfpMode==='compare' && rectResult && rectResult.nfp) cmCompareRectNfp(rectResult.nfp,nfp.children,B,null);
 		return nfp.children;
 	}
 	
@@ -934,10 +1229,12 @@ function placeParts(sheets, parts, config, nestindex){
 			var clipkey = 's:'+part.source+'r:'+part.rotation;
 			var startindex = 0;
 			if(clipCache[clipkey]){
+				if(typeof cmNestProfile !== 'undefined' && cmNestProfile)cmProfileAddCount('placeClipCacheHits',1);
 				var prevNfp = clipCache[clipkey].nfp;
 				clipper.AddPaths(prevNfp, ClipperLib.PolyType.ptSubject, true);
 				startindex = clipCache[clipkey].index;
 			}
+			else if(typeof cmNestProfile !== 'undefined' && cmNestProfile) cmProfileAddCount('placeClipCacheMisses',1);
 			
 			for(j=startindex; j<placed.length; j++){
 				nfp = getOuterNfp(placed[j], part);

@@ -1,6 +1,6 @@
 {
   "name": "Deepnest.io",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Deep nesting for Laser and CNC",
   "main": "main.js",
   "scripts": {
@@ -63,7 +63,14 @@
       "!minkowski/Release/**",
       "!**/*.bak",
       "!**/*.bak-*",
-      "!package.json.bak-appimage"
+      "!package.json.bak-appimage",
+      "!tools/geometry-audit/README.md",
+      "!tools/geometry-audit/audit.cjs",
+      "!tools/geometry-audit/performance.test.cjs",
+      "!tools/geometry-audit/serialization.test.cjs",
+      "!tools/geometry-audit/timer-regression.test.cjs",
+      "!test.json",
+      "!README.original.md"
     ],
     "linux": {
       "target": [

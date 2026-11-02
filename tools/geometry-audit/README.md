@@ -1,0 +1,21 @@
+# Auditor geométrico C&M
+
+El snapshot solo se captura por acción manual y solo cuando la aplicación se inicia con `CM_NEST_PROFILE=1`. Al terminar un trabajo aparece **Exportar snapshot geométrico**. Al pulsarlo, se toma el acomodo seleccionado en ese momento, igual que el selector de SVG; si el trabajo cambió o no hay una selección, la exportación se rechaza. El archivo se crea con modo exclusivo (`wx`); si ya existe, se informa el error y no se sobrescribe.
+
+```bash
+CM_NEST_PROFILE=1 npm start
+node tools/geometry-audit/audit.cjs --self-test
+node tools/geometry-audit/serialization.test.cjs
+ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron tools/geometry-audit/performance.test.cjs
+node tools/geometry-audit/audit.cjs snapshot.json --output audit-report.json
+```
+
+La entrada usa `deepnest-cm-geometry-audit-input/v2`. Los snapshots v1 se rechazan con `NOT_VERIFIED`: no contienen identidad física de hojas fiable. `sheetid` en v2 es un ID diagnóstico único por grupo físico de `nest.placements`; `engineSheetId` conserva el ID original posiblemente repetido y nunca se usa para agrupar. El orden de grupos coincide con el orden de grupos que recorre la exportación SVG. El auditor toma Clipper de `main/util/clipper.js`; no requiere instalar dependencias. `audit-report.json` tampoco se sobrescribe. La captura serializa los árboles fuente de `DeepNest.parts`, omite los offsets temporales del motor y copia de la solución seleccionada únicamente IDs, hoja y transformaciones. `spacingMm` se deriva de las unidades SVG y `scale` (unidades por pulgada). La aplicación no tiene un ajuste independiente de margen de hoja; se informa cero y queda identificado como ausente.
+
+La verificación de límites usa el contorno fuente de la hoja y el margen registrado. Si se añade una configuración de margen, el auditor exige geometría de límite utilizable para confirmar ese margen; no la infiere. Las geometrías cercanas a la rejilla de Clipper quedan `NOT_VERIFIED`. El descarte espacial usa separación euclidiana mínima entre bounding boxes de todos los contornos, con una banda conservadora de dos celdas Clipper y un margen de redondeo por magnitud de coordenadas; si una pareja puede tocarse, solaparse o incumplir spacing, se conserva la operación geométrica exacta. `performance.test.cjs` compara con `spatial:false`, que ejecuta la ruta exhaustiva, usando el mismo fixture y verifica equivalencia semántica.
+
+La distancia entre segmentos se calcula en coordenadas locales/relativas por pareja para evitar restar vértices globales grandes. El reporte agrega `minimumSpacingWitness` con hoja física, IDs, anillos/rutas, segmentos, distancia, requisito e intervalo. El intervalo incorpora una cota de redondeo de operaciones basada en `Number.EPSILON`, ULP de las traslaciones almacenadas y una envolvente para las operaciones trigonométricas; no usa la rejilla Clipper como sustituto del error de coma flotante. La regla es conservadora: `PASS` si el límite inferior llega al requisito; `FAIL` si el superior queda por debajo; si el intervalo cruza el umbral, `NOT_VERIFIED`. Por ello un valor nominal exacto de 0.5 mm puede quedar `NOT_VERIFIED`.
+
+Los predicados de orientación usan una ruta rápida con cota de error y un fallback exacto dyádico para el signo de los doubles representados; se retiró el epsilon absoluto `1e-12`. Esto no reconstruye curvas SVG: la fuente sigue siendo el contorno poligonalizado/limpiado por SvgParser. La cota numérica se refiere a esa geometría representada y a los coeficientes `Math.sin/cos` del runtime; no demuestra desviación de las curvas originales, tolerancias de máquina, kerf ni precisión física. En coordenadas globales muy grandes, la cota aumenta por los ULP de las traslaciones y puede dejar el resultado como `NOT_VERIFIED`; longitudes o distancias que subdesborden/sobreborden el cálculo también quedan sin verificar. La envolvente es conservadora para las operaciones IEEE-754 ejecutadas y el `Math.sin/cos` del runtime objetivo, pero no constituye una prueba formal portable de la biblioteca trigonométrica ECMAScript.
+
+La exportación nunca vuelve a ejecutar el anidado. No se crea ningún snapshot automáticamente y los errores se limitan a la consola de diagnóstico.
